@@ -40,3 +40,15 @@ npm audit --omit=dev
 ```
 
 See `SECURITY.md` for the launch checklist.
+
+## Deploy on Hostinger
+
+Create a **Node.js / Next.js application** in Hostinger rather than a static website. Use:
+
+- Node.js version: `22`
+- Install command: `npm ci`
+- Build command: `npm run build`
+- Start command: `npm run start`
+- Output directory: `.next`
+
+The default build now produces Hostinger's standard `.next` server output. The Cloudflare/Sites adapter remains available through `npm run build:sites`.
