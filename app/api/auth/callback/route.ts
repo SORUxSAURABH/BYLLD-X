@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
+import { getPublicOrigin } from "../../../../lib/origin";
 
 /**
  * OAuth callback handler for Google sign-in via Supabase.
@@ -7,7 +8,8 @@ import { createClient } from "../../../../lib/supabase/server";
  * We exchange the code for a session and redirect to the dashboard.
  */
 export async function GET(request: NextRequest) {
-  const { searchParams, origin } = new URL(request.url);
+  const origin = getPublicOrigin(request);
+  const { searchParams } = new URL(request.url);
   const code = searchParams.get("code");
   // Where to send the user after login (passed through state)
   const next = searchParams.get("next") ?? "/dashboard";

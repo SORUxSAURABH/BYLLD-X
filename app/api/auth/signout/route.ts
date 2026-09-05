@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
+import { getPublicOrigin } from "../../../../lib/origin";
 
 /**
  * Sign-out route — clears the Supabase session cookie and redirects home.
@@ -7,6 +8,6 @@ import { createClient } from "../../../../lib/supabase/server";
 export async function POST(request: NextRequest) {
   const supabase = await createClient();
   await supabase.auth.signOut();
-  const origin = request.nextUrl?.origin || process.env.NEXT_PUBLIC_SITE_URL || "https://bylldx.in";
+  const origin = getPublicOrigin(request);
   return NextResponse.redirect(new URL("/", origin));
 }

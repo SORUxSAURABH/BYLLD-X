@@ -2,6 +2,7 @@ import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
 import { getSupabaseConfig } from "./lib/supabase/config";
+import { getPublicOrigin } from "./lib/origin";
 
 /**
  * Next.js 16 Proxy (formerly middleware).
@@ -12,12 +13,13 @@ import { getSupabaseConfig } from "./lib/supabase/config";
  *  4. Redirect authenticated visitors away from /signin and /join.
  */
 export async function proxy(request: NextRequest) {
+  const origin = getPublicOrigin(request);
   const { pathname, searchParams } = request.nextUrl;
 
   // If an OAuth code lands on root or any other page, redirect to the callback handler
   const code = searchParams.get("code");
   if (code && pathname !== "/api/auth/callback") {
-    const callbackUrl = new URL("/api/auth/callback", request.url);
+    const callbackUrl = new URL("/api/auth/callback", origin);
     searchParams.forEach((value, key) => {
       callbackUrl.searchParams.set(key, value);
     });
@@ -52,14 +54,14 @@ export async function proxy(request: NextRequest) {
     if (request.nextUrl.searchParams.has("role")) {
       return response;
     }
-    const loginUrl = new URL("/signin", request.url);
+    const loginUrl = new URL("/signin", origin);
     loginUrl.searchParams.set("next", pathname + request.nextUrl.search);
     return NextResponse.redirect(loginUrl);
   }
 
   // Redirect already-logged-in users away from auth pages
   if ((pathname === "/signin" || pathname === "/join") && user) {
-    return NextResponse.redirect(new URL("/dashboard", request.url));
+    return NextResponse.redirect(new URL("/dashboard", origin));
   }
 
   return response;
