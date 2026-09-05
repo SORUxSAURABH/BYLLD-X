@@ -4,4 +4,10 @@ import DashboardApp from "../components/DashboardApp";
 
 export const metadata: Metadata = { title: "Product Preview", robots: { index: false, follow: false } };
 
-export default function DashboardPage(){ return <Suspense fallback={<div className="app-body"/>}><DashboardApp /></Suspense>; }
+export default function DashboardPage() {
+  return (
+    <Suspense fallback={<div className="app-body" style={{ minHeight: "100vh" }} />}>
+      <DashboardApp />
+    </Suspense>
+  );
+}
