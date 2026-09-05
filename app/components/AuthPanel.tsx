@@ -34,7 +34,10 @@ export default function AuthPanel({ mode }: { mode: "signin" | "join" }) {
 
   /* ---------- helpers ---------- */
   function getSiteUrl() {
-    return process.env.NEXT_PUBLIC_SITE_URL ?? window.location.origin;
+    if (typeof window !== "undefined" && window.location?.origin) {
+      return window.location.origin;
+    }
+    return process.env.NEXT_PUBLIC_SITE_URL || "https://bylldx.in";
   }
 
   function getRedirectTarget(userRole?: string) {

@@ -1,24 +1,34 @@
 import { NextResponse } from "next/server";
 import type { NextRequest } from "next/server";
 import { createServerClient } from "@supabase/ssr";
+import { getSupabaseConfig } from "./lib/supabase/config";
 
 /**
  * Next.js 16 Proxy (formerly middleware).
  * Runs on every matched request to:
- *  1. Refresh the Supabase auth session so cookies stay valid.
- *  2. Redirect unauthenticated visitors away from /dashboard.
- *  3. Redirect authenticated visitors away from /signin and /join.
+ *  1. Forward any incoming OAuth ?code=... to /api/auth/callback.
+ *  2. Refresh the Supabase auth session so cookies stay valid.
+ *  3. Redirect unauthenticated visitors away from /dashboard.
+ *  4. Redirect authenticated visitors away from /signin and /join.
  */
 export async function proxy(request: NextRequest) {
+  const { pathname, searchParams } = request.nextUrl;
+
+  // If an OAuth code lands on root or any other page, redirect to the callback handler
+  const code = searchParams.get("code");
+  if (code && pathname !== "/api/auth/callback") {
+    const callbackUrl = new URL("/api/auth/callback", request.url);
+    searchParams.forEach((value, key) => {
+      callbackUrl.searchParams.set(key, value);
+    });
+    return NextResponse.redirect(callbackUrl);
+  }
+
   const response = NextResponse.next({
     request: { headers: request.headers },
   });
 
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY;
-
-  // If Supabase is not configured, skip auth enforcement (preview / CI mode)
-  if (!url || !key) return response;
+  const { url, publishableKey: key } = getSupabaseConfig();
 
   const supabase = createServerClient(url, key, {
     cookies: {
@@ -36,8 +46,6 @@ export async function proxy(request: NextRequest) {
   const {
     data: { user },
   } = await supabase.auth.getUser();
-
-  const { pathname } = request.nextUrl;
 
   // Protect /dashboard — unauthenticated users go to /signin (allow preview mode when ?role is present)
   if (pathname.startsWith("/dashboard") && !user) {
