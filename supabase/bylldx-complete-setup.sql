@@ -17,6 +17,7 @@ create type public.account_status as enum ('active','suspended','banned');
 create table public.users (
   id uuid primary key references auth.users(id) on delete cascade,
   email text not null unique,
+  full_name text,
   role public.account_role not null,
   account_status public.account_status not null default 'active',
   suspended_until timestamptz,
@@ -34,11 +35,13 @@ create table public.profiles (
   headline text check (char_length(headline) <= 180),
   bio text check (char_length(bio) <= 2000),
   location text check (char_length(location) <= 160),
+  phone text,
   photo_path text,
   website_url text,
   linkedin_url text,
   completion_percent smallint not null default 10 check (completion_percent between 0 and 100),
   is_discoverable boolean not null default true,
+  onboarding_complete boolean default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -46,6 +49,10 @@ create table public.profiles (
 create table public.founder_profiles (
   user_id uuid primary key references public.users(id) on delete cascade,
   founder_role text,
+  startup_name text check (startup_name is null or char_length(startup_name) <= 160),
+  industry text check (industry is null or char_length(industry) <= 120),
+  startup_stage text check (startup_stage is null or startup_stage in ('idea', 'mvp', 'early_revenue', 'scaling')),
+  startup_pitch text check (startup_pitch is null or char_length(startup_pitch) <= 420),
   years_experience smallint check (years_experience between 0 and 80),
   prior_startups smallint not null default 0 check (prior_startups >= 0)
 );
@@ -53,6 +60,9 @@ create table public.founder_profiles (
 create table public.investor_profiles (
   user_id uuid primary key references public.users(id) on delete cascade,
   investor_type text,
+  firm_name text check (firm_name is null or char_length(firm_name) <= 160),
+  sectors_of_interest text check (sectors_of_interest is null or char_length(sectors_of_interest) <= 1000),
+  typical_check_size_inr bigint check (typical_check_size_inr is null or typical_check_size_inr >= 0),
   min_investment_inr bigint check (min_investment_inr >= 0),
   max_investment_inr bigint check (max_investment_inr >= min_investment_inr),
   investment_thesis text check (char_length(investment_thesis) <= 2500)
@@ -384,11 +394,14 @@ grant usage on schema public to authenticated;
 revoke all on all tables in schema public from anon;
 grant select on public.industries,public.niches to authenticated;
 grant select,insert,update,delete on public.profiles,public.founder_profiles,public.investor_profiles,public.profile_niches,public.ideas,public.idea_details,public.saved_profiles,public.connection_requests,public.blocks,public.messages,public.notifications,public.reports,public.presence to authenticated;
-grant select on public.users,public.profile_views,public.weekly_usage,public.connections,public.conversations,public.subscriptions,public.payments to authenticated;
+grant select,insert,update on public.users to authenticated;
+grant select on public.profile_views,public.weekly_usage,public.connections,public.conversations,public.subscriptions,public.payments to authenticated;
 revoke all on public.admin_actions from anon,authenticated;
 grant usage,select on all sequences in schema public to authenticated;
 
 create policy users_self_select on public.users for select to authenticated using(id=(select auth.uid()) or public.is_admin());
+create policy users_self_insert on public.users for insert to authenticated with check(id=(select auth.uid()));
+create policy users_self_update on public.users for update to authenticated using(id=(select auth.uid())) with check(id=(select auth.uid()));
 create policy profiles_member_select on public.profiles for select to authenticated using(is_discoverable or user_id=(select auth.uid()) or public.is_admin());
 create policy profiles_self_insert on public.profiles for insert to authenticated with check(user_id=(select auth.uid()));
 create policy profiles_self_update on public.profiles for update to authenticated using(user_id=(select auth.uid())) with check(user_id=(select auth.uid()));

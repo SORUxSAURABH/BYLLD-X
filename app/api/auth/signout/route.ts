@@ -9,5 +9,16 @@ export async function POST(request: NextRequest) {
   const supabase = await createClient();
   await supabase.auth.signOut();
   const origin = getPublicOrigin(request);
-  return NextResponse.redirect(new URL("/", origin));
+  const res = NextResponse.redirect(new URL("/", origin));
+  res.cookies.delete("bylld_role");
+  return res;
+}
+
+export async function GET(request: NextRequest) {
+  const supabase = await createClient();
+  await supabase.auth.signOut();
+  const origin = getPublicOrigin(request);
+  const res = NextResponse.redirect(new URL("/join", origin));
+  res.cookies.delete("bylld_role");
+  return res;
 }

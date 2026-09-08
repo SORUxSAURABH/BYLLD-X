@@ -656,7 +656,7 @@ body{margin:0;padding:48px;background:#f8fbff;color:#06143d;font-family:Inter,Ar
               aria-current={activeTab === tab.id ? "page" : undefined}
             >
               <Icon name={tab.icon} /> {tab.label}
-              {tab.id === "broadcast" && data.broadcast.active && <span className="tab-alert-dot" />}
+              {tab.id === "broadcast" && data.broadcast?.active && <span className="tab-alert-dot" />}
             </button>
           ))}
         </nav>
@@ -788,7 +788,7 @@ body{margin:0;padding:48px;background:#f8fbff;color:#06143d;font-family:Inter,Ar
 
         {activeTab === "broadcast" && (
           <section className="tab-panel" aria-labelledby="broadcast-title">
-            <div className="section-heading"><div><p className="eyebrow">Platform-wide communications</p><h2 id="broadcast-title">Global broadcast banner</h2><p>Publish a concise message to every active user dashboard.</p></div>{data.broadcast.active ? <Pill tone="green"><span className="pill-dot" /> Broadcast live</Pill> : <Pill tone="slate">Offline</Pill>}</div>
+            <div className="section-heading"><div><p className="eyebrow">Platform-wide communications</p><h2 id="broadcast-title">Global broadcast banner</h2><p>Publish a concise message to every active user dashboard.</p></div>{data.broadcast?.active ? <Pill tone="green"><span className="pill-dot" /> Broadcast live</Pill> : <Pill tone="slate">Offline</Pill>}</div>
             <div className="broadcast-grid">
               <form className="glass-card broadcast-form" onSubmit={publishBroadcast}>
                 <div className="form-heading"><span><Icon name="broadcast" /></span><div><h3>Compose announcement</h3><p>Keep operational broadcasts brief and actionable.</p></div></div>

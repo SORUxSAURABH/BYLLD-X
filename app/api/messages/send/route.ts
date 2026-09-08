@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
+import { detectContactInfo } from "../../../../lib/contactFilter";
 
 /**
  * POST /api/messages/send
@@ -10,9 +11,7 @@ import { createClient } from "../../../../lib/supabase/server";
  *  3. Sender has Premium subscription
  *  4. No block in either direction
  *  5. Message body length 1–5000 chars
- *
- * The DB revokes direct INSERT on public.messages from `authenticated`,
- * so all sends must go through this route.
+ *  6. No direct contact details (phone, email, socials) to prevent platform disintermediation
  */
 export async function POST(req: NextRequest) {
   const supabase = await createClient();
@@ -35,6 +34,15 @@ export async function POST(req: NextRequest) {
 
   if (!conversationId || !body || body.length > 5000) {
     return NextResponse.json({ error: "conversationId and body (1–5000 chars) are required" }, { status: 400 });
+  }
+
+  // Enforce privacy: block direct phone numbers, email addresses, and social handles
+  const contactCheck = detectContactInfo(body);
+  if (contactCheck.hasContactInfo) {
+    return NextResponse.json(
+      { error: contactCheck.reason || "Sharing external contact details (phone numbers, emails, social handles) is strictly prohibited. Please continue your conversation inside BYLLD X." },
+      { status: 400 }
+    );
   }
 
   // 3. Check conversation exists and sender is a participant
@@ -68,9 +76,10 @@ export async function POST(req: NextRequest) {
     .select("id")
     .eq("user_id", user.id)
     .eq("tier", "premium")
+    .lte("starts_at", now)
     .gt("ends_at", now)
     .limit(1)
-    .single();
+    .maybeSingle();
 
   if (!sub) {
     return NextResponse.json({ error: "Premium subscription required to send messages" }, { status: 403 });

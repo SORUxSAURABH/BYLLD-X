@@ -48,10 +48,12 @@ export default function InboxView({
   role,
   authUser,
   connectedPeers = [],
+  isPremium = false,
 }: {
   role: Role;
   authUser: AuthUser | null;
   connectedPeers?: string[][];
+  isPremium?: boolean;
 }) {
   const searchParams = useSearchParams();
   const targetPeer = searchParams.get("peer");
@@ -61,94 +63,47 @@ export default function InboxView({
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"messages" | "notifications">("messages");
 
-  /* ── Load conversations ── */
+  /* ── Load conversations directly from Supabase ── */
   useEffect(() => {
-    // Build conversations from connected peers
-    let peers = connectedPeers;
-    if (peers.length === 0 && typeof window !== "undefined") {
-      const stored = localStorage.getItem(`bylldx_${role}_connected`);
-      if (stored) {
-        try {
-          peers = JSON.parse(stored);
-        } catch {}
-      }
-    }
-
-    const peerConvs: Conversation[] = peers.map((p) => {
-      const convId = `conv-${p[1].toLowerCase().replace(/[^a-z0-9]/g, "-")}`;
-      let lastMsg = "Connected! Start a conversation.";
-      let lastMsgMine = false;
-      let updatedAt = new Date().toISOString();
-      if (typeof window !== "undefined") {
-        const history = localStorage.getItem(`bylldx_chat_${convId}`);
-        if (history) {
-          try {
-            const msgs = JSON.parse(history);
-            if (msgs.length > 0) {
-              const latest = msgs[msgs.length - 1];
-              lastMsg = latest.body;
-              lastMsgMine = latest.sender_id === (authUser?.id ?? "self");
-              updatedAt = latest.created_at;
-            }
-          } catch {}
-        }
-      }
-      return {
-        conversationId: convId,
-        peerId: `peer-${p[1].toLowerCase().replace(/[^a-z0-9]/g, "-")}`,
-        peerName: p[1],
-        peerInitials: p[0],
-        peerOnline: false,
-        photoUrl: null,
-        lastMessage: lastMsg,
-        lastMessageMine: lastMsgMine,
-        updatedAt,
-      };
-    });
-
     if (!authUser) {
-      setConversations(peerConvs);
-      if (peerConvs.length > 0) {
-        if (targetPeer) {
-          const found = peerConvs.find((c) => c.peerName.toLowerCase() === targetPeer.toLowerCase());
-          setSelected(found ?? peerConvs[0]);
-        } else {
-          setSelected(peerConvs[0]);
-        }
-      }
+      setConversations([]);
+      setSelected(null);
       setLoading(false);
       return;
     }
 
-    fetch("/api/conversations")
-      .then((r) => r.json())
-      .then(({ conversations: convs }) => {
-        const dbList: Conversation[] = convs ?? [];
-        const merged = [...dbList];
-        for (const pc of peerConvs) {
-          if (!merged.some((m) => m.peerName.toLowerCase() === pc.peerName.toLowerCase())) {
-            merged.push(pc);
-          }
-        }
-        setConversations(merged);
-        if (merged.length > 0) {
-          if (targetPeer) {
-            const found = merged.find((c) => c.peerName.toLowerCase() === targetPeer.toLowerCase());
-            setSelected(found ?? merged[0]);
+    const loadConversations = () => {
+      fetch("/api/conversations")
+        .then((r) => r.json())
+        .then(({ conversations: convs }) => {
+          const list: Conversation[] = convs ?? [];
+          setConversations(list);
+          if (list.length > 0) {
+            setSelected((prev) => {
+              if (prev) {
+                const match = list.find((c) => c.conversationId === prev.conversationId);
+                if (match) return match;
+              }
+              if (targetPeer) {
+                const found = list.find((c) => c.peerName.toLowerCase() === targetPeer.toLowerCase());
+                return found ?? list[0];
+              }
+              return list[0];
+            });
           } else {
-            setSelected(merged[0]);
+            setSelected(null);
           }
-        }
-        setLoading(false);
-      })
-      .catch(() => {
-        setConversations(peerConvs);
-        if (peerConvs.length > 0) {
-          setSelected(peerConvs[0]);
-        }
-        setLoading(false);
-      });
-  }, [authUser, connectedPeers, targetPeer, role]);
+          setLoading(false);
+        })
+        .catch(() => {
+          setConversations([]);
+          setSelected(null);
+          setLoading(false);
+        });
+    };
+
+    loadConversations();
+  }, [authUser, role, connectedPeers, targetPeer]);
 
   /* ── Subscribe to real-time presence changes for real users ── */
   useEffect(() => {
@@ -209,7 +164,7 @@ export default function InboxView({
     };
   }, [authUser]);
 
-  const isPremium = authUser?.isPremium ?? role === "investor";
+  const canMessage = Boolean(authUser?.isPremium || isPremium);
 
   /* ── No auth / loading ── */
   if (loading) {
@@ -217,7 +172,7 @@ export default function InboxView({
   }
 
   /* ── Empty state (no connections yet) ── */
-  if (!authUser || conversations.length === 0) {
+  if (conversations.length === 0) {
     return (
       <>
         <div className="app-welcome">
@@ -318,11 +273,10 @@ export default function InboxView({
             <RealtimeChat
               conversationId={selected.conversationId}
               currentUserId={authUser?.id ?? null}
-              isPremium={isPremium}
+              isPremium={canMessage}
               peerName={selected.peerName}
               peerInitials={selected.peerInitials}
               peerOnline={selected.peerOnline}
-              peerId={selected.peerId}
             />
           ) : (
             <div className="chat" style={{ display: "flex", alignItems: "center", justifyContent: "center" }}>

@@ -29,6 +29,11 @@ export async function proxy(request: NextRequest) {
   const response = NextResponse.next({
     request: { headers: request.headers },
   });
+  const redirectWithSessionCookies = (target: URL) => {
+    const redirect = NextResponse.redirect(target);
+    response.cookies.getAll().forEach((cookie) => redirect.cookies.set(cookie));
+    return redirect;
+  };
 
   const { url, publishableKey: key } = getSupabaseConfig();
 
@@ -49,19 +54,46 @@ export async function proxy(request: NextRequest) {
     data: { user },
   } = await supabase.auth.getUser();
 
-  // Protect /dashboard — unauthenticated users go to /signin (allow preview mode when ?role is present)
-  if (pathname.startsWith("/dashboard") && !user) {
+  // Protect member setup and dashboard routes. A role query keeps the explicit
+  // unauthenticated product preview available on /dashboard only.
+  if ((pathname.startsWith("/dashboard") || pathname.startsWith("/onboarding")) && !user) {
     if (request.nextUrl.searchParams.has("role")) {
-      return response;
+      if (pathname.startsWith("/dashboard")) return response;
     }
     const loginUrl = new URL("/signin", origin);
     loginUrl.searchParams.set("next", pathname + request.nextUrl.search);
-    return NextResponse.redirect(loginUrl);
+    return redirectWithSessionCookies(loginUrl);
   }
 
-  // Redirect already-logged-in users away from auth pages
-  if ((pathname === "/signin" || pathname === "/join") && user) {
-    return NextResponse.redirect(new URL("/dashboard", origin));
+  if (user && (
+    pathname.startsWith("/dashboard") ||
+    pathname.startsWith("/onboarding")
+  )) {
+    if (pathname.startsWith("/dashboard") && (request.nextUrl.searchParams.has("role") || request.nextUrl.searchParams.get("demo") === "true")) {
+      return response;
+    }
+
+    const { data: account } = await supabase
+      .from("users")
+      .select("role, onboarding_completed_at")
+      .eq("id", user.id)
+      .maybeSingle();
+    const role = account?.role === "investor" ? "investor" : "founder";
+    const onboardingComplete = Boolean(account?.onboarding_completed_at);
+
+    if (!onboardingComplete && pathname.startsWith("/dashboard")) {
+      return redirectWithSessionCookies(new URL(`/onboarding?role=${role}`, origin));
+    }
+    if (
+      !onboardingComplete
+      && pathname.startsWith("/onboarding")
+      && request.nextUrl.searchParams.get("role") !== role
+    ) {
+      return redirectWithSessionCookies(new URL(`/onboarding?role=${role}`, origin));
+    }
+    if (onboardingComplete && pathname.startsWith("/onboarding")) {
+      return redirectWithSessionCookies(new URL(`/dashboard?role=${role}`, origin));
+    }
   }
 
   return response;

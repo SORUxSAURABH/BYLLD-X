@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import crypto from "crypto";
-import { createClient } from "../../../../lib/supabase/server";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 
 /**
  * POST /api/payment/webhook
@@ -17,18 +17,23 @@ export async function POST(req: NextRequest) {
   const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
   const rawBody = await req.text();
 
-  // 1. Verify signature if secret is configured
-  if (webhookSecret) {
-    const signature = req.headers.get("x-razorpay-signature") ?? "";
-    const expectedSig = crypto
-      .createHmac("sha256", webhookSecret)
-      .update(rawBody)
-      .digest("hex");
+  if (!webhookSecret) {
+    return NextResponse.json({ error: "Webhook is not configured" }, { status: 503 });
+  }
 
-    if (!crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSig))) {
-      console.error("Razorpay webhook: invalid signature");
-      return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
-    }
+  // 1. Always verify the raw payload before parsing or performing any writes.
+  const signature = req.headers.get("x-razorpay-signature") ?? "";
+  const expectedSignature = crypto
+    .createHmac("sha256", webhookSecret)
+    .update(rawBody)
+    .digest("hex");
+  const receivedBuffer = Buffer.from(signature, "utf8");
+  const expectedBuffer = Buffer.from(expectedSignature, "utf8");
+  if (
+    receivedBuffer.length !== expectedBuffer.length
+    || !crypto.timingSafeEqual(receivedBuffer, expectedBuffer)
+  ) {
+    return NextResponse.json({ error: "Invalid signature" }, { status: 401 });
   }
 
   // 2. Parse event
@@ -41,7 +46,6 @@ export async function POST(req: NextRequest) {
           order_id: string;
           amount: number;
           status: string;
-          notes: { user_id?: string };
         };
       };
     };
@@ -55,39 +59,33 @@ export async function POST(req: NextRequest) {
   // 3. Handle payment.captured
   if (event.event === "payment.captured") {
     const payment = event.payload.payment.entity;
-    const userId = payment.notes?.user_id;
-    if (!userId) {
-      console.error("Webhook: missing user_id in payment notes");
-      return NextResponse.json({ error: "Missing user_id" }, { status: 400 });
+    if (!payment?.id || !payment.order_id || payment.status !== "captured") {
+      return NextResponse.json({ error: "Invalid captured payment" }, { status: 400 });
     }
 
     const amountInr = Math.round(payment.amount / 100);
     if (amountInr !== 240 && amountInr !== 310) {
-      console.error("Webhook: unexpected amount", amountInr);
       return NextResponse.json({ error: "Unexpected amount" }, { status: 400 });
     }
 
-    // Use service-role client to write subscription and payment records
-    const supabase = await createClient();
+    let supabase;
+    try {
+      supabase = createAdminClient();
+    } catch {
+      return NextResponse.json({ error: "Webhook fulfillment is not configured" }, { status: 503 });
+    }
 
-    // Mark payment as successful
-    await supabase.rpc("confirm_payment", {
-      p_provider_payment_id: payment.order_id,
-      p_razorpay_payment_id: payment.id,
+    // The signed order ID is resolved to the pending DB payment. User identity and
+    // price are never taken from mutable Razorpay notes.
+    const { error } = await supabase.rpc("complete_razorpay_payment", {
+      p_order_id: payment.order_id,
+      p_payment_id: payment.id,
+      p_amount_inr: amountInr,
     });
-
-    // Activate 30-day premium subscription
-    const startsAt = new Date();
-    const endsAt = new Date(startsAt);
-    endsAt.setDate(endsAt.getDate() + 30);
-
-    await supabase.rpc("activate_subscription", {
-      p_user_id: userId,
-      p_starts_at: startsAt.toISOString(),
-      p_ends_at: endsAt.toISOString(),
-    });
-
-    console.log(`✓ Subscription activated for user ${userId} until ${endsAt.toISOString()}`);
+    if (error) {
+      console.error("Razorpay webhook fulfillment failed:", error.message);
+      return NextResponse.json({ error: "Could not fulfill payment" }, { status: 500 });
+    }
   }
 
   return NextResponse.json({ received: true });

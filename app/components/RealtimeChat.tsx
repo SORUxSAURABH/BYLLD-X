@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { hasSupabaseConfig } from "../../lib/supabase/config";
+import { detectContactInfo } from "../../lib/contactFilter";
 
 interface Message {
   id: string;
@@ -18,32 +19,9 @@ interface ChatProps {
   peerName: string;
   peerInitials: string;
   peerOnline?: boolean;
-  peerId?: string;
 }
 
 const supabaseReady = hasSupabaseConfig();
-
-// Mock messages for preview mode (no Supabase configured)
-const MOCK_MESSAGES: Message[] = [
-  {
-    id: "m1",
-    sender_id: "peer",
-    body: "Thanks for connecting. I reviewed the public overview and would love to understand the current pilot.",
-    created_at: new Date(Date.now() - 90 * 60000).toISOString(),
-  },
-  {
-    id: "m2",
-    sender_id: "self",
-    body: "Great to meet you. The pilot has been live across three sites for six weeks.",
-    created_at: new Date(Date.now() - 83 * 60000).toISOString(),
-  },
-  {
-    id: "m3",
-    sender_id: "peer",
-    body: "That is useful context. Could we set up a short call next Tuesday?",
-    created_at: new Date(Date.now() - 62 * 60000).toISOString(),
-  },
-];
 
 function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
@@ -77,37 +55,8 @@ export default function RealtimeChat({
 
   /* ── Load initial messages + subscribe to real-time updates ── */
   useEffect(() => {
-    if (!supabaseReady || !conversationId) {
-      // Preview/mock mode — use hardcoded messages
-      setMessages(MOCK_MESSAGES);
-      setOnline(peerOnline);
-      return;
-    }
-
-    if (conversationId.startsWith("conv-")) {
-      // Peer conversation from accepted connections
-      setOnline(peerOnline);
-      if (typeof window !== "undefined") {
-        const saved = localStorage.getItem(`bylldx_chat_${conversationId}`);
-        if (saved) {
-          try {
-            setMessages(JSON.parse(saved));
-            return;
-          } catch {}
-        }
-      }
-      const initial: Message[] = [
-        {
-          id: `${conversationId}-init-1`,
-          sender_id: "peer",
-          body: `Hi! Glad to connect on BYLLD X. I went through your profile overview and would love to hear more about what you're working on.`,
-          created_at: new Date(Date.now() - 25 * 60000).toISOString(),
-        },
-      ];
-      setMessages(initial);
-      if (typeof window !== "undefined") {
-        localStorage.setItem(`bylldx_chat_${conversationId}`, JSON.stringify(initial));
-      }
+    if (!currentUserId || !supabaseReady || !conversationId) {
+      setMessages([]);
       return;
     }
 
@@ -148,56 +97,33 @@ export default function RealtimeChat({
     return () => {
       supabase.removeChannel(channel);
     };
-  }, [conversationId]);
+  }, [conversationId, currentUserId]);
 
   /* ── Send a message ── */
   const sendMessage = useCallback(async () => {
     const body = draft.trim();
-    if (!body || sending) return;
+    if (!body || sending || !isPremium) return;
 
     setSending(true);
     setChatError("");
 
-    if (!supabaseReady || !conversationId || conversationId.startsWith("conv-")) {
-      // Local/peer conversation — append locally, persist, and simulate reply
-      const userMsg: Message = {
-        id: `msg-${Date.now()}`,
-        sender_id: currentUserId ?? "self",
-        body,
-        created_at: new Date().toISOString(),
-      };
-      const nextMessages = [...messages, userMsg];
-      setMessages(nextMessages);
-      if (typeof window !== "undefined") {
-        localStorage.setItem(`bylldx_chat_${conversationId}`, JSON.stringify(nextMessages));
-      }
-      setDraft("");
+    // Enforce privacy: block phone numbers, emails, and external social media links
+    const contactCheck = detectContactInfo(body);
+    if (contactCheck.hasContactInfo) {
+      setChatError(contactCheck.reason || "Sharing external contact details (phone, email, socials) is not permitted. Please keep communications on BYLLD X.");
       setSending(false);
-      inputRef.current?.focus();
+      return;
+    }
 
-      // Simulate a realistic reply from peer
-      setTimeout(() => {
-        const replies = [
-          `Thanks for the note! I've reviewed your profile and idea teaser. Let's set up a quick 15-minute call this week.`,
-          `Great point! What does your current traction and customer retention look like?`,
-          `Sounds very interesting. I'd love to review your full problem/solution deck. Could you share more details?`,
-          `Thanks for reaching out! Let me review this with my partners and follow up shortly.`,
-        ];
-        const reply = replies[Math.floor(Math.random() * replies.length)];
-        const peerReply: Message = {
-          id: `reply-${Date.now()}`,
-          sender_id: "peer",
-          body: reply,
-          created_at: new Date().toISOString(),
-        };
-        setMessages((prev) => {
-          const updated = [...prev, peerReply];
-          if (typeof window !== "undefined") {
-            localStorage.setItem(`bylldx_chat_${conversationId}`, JSON.stringify(updated));
-          }
-          return updated;
-        });
-      }, 1400);
+    if (!currentUserId) {
+      setChatError("Please sign in to send messages.");
+      setSending(false);
+      return;
+    }
+
+    if (!supabaseReady || !conversationId) {
+      setChatError("Messaging is unavailable until Supabase is configured.");
+      setSending(false);
       return;
     }
 
@@ -220,7 +146,7 @@ export default function RealtimeChat({
     } finally {
       setSending(false);
     }
-  }, [draft, sending, conversationId, currentUserId, messages]);
+  }, [draft, sending, isPremium, conversationId, currentUserId]);
 
   /* ── Enter key to send ── */
   function handleKeyDown(e: React.KeyboardEvent<HTMLInputElement>) {
@@ -260,15 +186,31 @@ export default function RealtimeChat({
         </div>
       </header>
 
+      {/* Safety & Contact Privacy Banner */}
+      <div
+        style={{
+          padding: "7px 14px",
+          background: "rgba(12, 85, 237, 0.07)",
+          borderBottom: "1px solid rgba(12, 85, 237, 0.12)",
+          fontSize: 11,
+          color: "var(--muted)",
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "center",
+          gap: 6,
+          textAlign: "center",
+        }}
+      >
+        <span>🔒 Contact details are kept private. Conversations must remain inside BYLLD X.</span>
+      </div>
+
       {/* Messages */}
       <div
         className="messages"
         style={{ flex: 1, overflowY: "auto", padding: "12px 16px", display: "flex", flexDirection: "column", gap: 8 }}
       >
         {messages.map((msg) => {
-          const isMine = supabaseReady
-            ? msg.sender_id === currentUserId
-            : msg.sender_id === "self";
+          const isMine = msg.sender_id === currentUserId;
           return (
             <div
               key={msg.id}
@@ -300,7 +242,7 @@ export default function RealtimeChat({
       )}
 
       {/* Input area */}
-      {isPremium || (conversationId && conversationId.startsWith("conv-")) ? (
+      {isPremium ? (
         <div
           className="chat-input-row"
           style={{
@@ -345,7 +287,7 @@ export default function RealtimeChat({
           }}
         >
           <p style={{ margin: "0 0 8px" }}>
-            <b>Read-only on Free.</b> Upgrade to Premium to send messages. Your conversation stays visible.
+            <b>Upgrade to Premium to message connections</b>
           </p>
           <a href="?view=subscription" className="button button-small">
             Upgrade to Premium →

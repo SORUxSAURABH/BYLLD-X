@@ -31,7 +31,7 @@ export default function Home() {
           <h1>WHERE <em>AMBITION</em><br />MEETS <em>BACKING.</em></h1>
           <p>Discover founders with conviction. Meet investors with context. Build trusted connections and discuss opportunities in one focused network.</p>
           <div className="hero-actions"><Link className="button" href="/join?role=founder">Join as Founder <span>→</span></Link><Link className="button button-ghost" href="/join?role=investor">Join as Investor <span>→</span></Link></div>
-          <div className="trust-row"><div><strong>12K+</strong><small>Founders</small></div><div><strong>2.8K+</strong><small>Investors</small></div><div><strong>₹850Cr+</strong><small>Capital intent</small></div></div>
+          <div className="trust-row"><div><strong>140+</strong><small>Founders</small></div><div><strong>42+</strong><small>Investors</small></div><div><strong>₹2.6L+</strong><small>Capital intent</small></div></div>
         </div>
 
         <div className="hero-stage" aria-label="BYLLD X product preview">
@@ -99,7 +99,7 @@ export default function Home() {
 
       <section className="section about-section glass" id="about"><div><span className="eyebrow">About BYLLD X</span><h2>BACKING INDIA&apos;S NEXT <em>BOLD MOVE.</em></h2></div><div><p>BYLLD X exists to give serious founders and investors a more intentional place to discover one another. Less broadcasting. More relevant context, responsible access and conversations that can move ambition forward.</p><Link href="/join" className="button">Join the network <span>→</span></Link></div></section>
 
-      <footer className="footer"><div className="footer-brand"><Logo /><p>Where ambition meets backing.</p></div><div><b>Platform</b><a href="#how">How it works</a><a href="#pricing">Pricing</a><Link href="/signin">Sign in</Link></div><div><b>Trust</b><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><Link href="/safety">Safety</Link></div><div><b>Connect</b><a href="mailto:hello@bylldx.in">hello@bylldx.in</a><a href="#">LinkedIn</a><a href="#">X / Twitter</a></div><div className="footer-bottom"><span>© 2026 BYLLD X. All rights reserved.</span><span>Made for builders in India.</span></div></footer>
+      <footer className="footer"><div className="footer-brand"><Logo /><p>Where ambition meets backing.</p></div><div><b>Platform</b><a href="#how">How it works</a><a href="#pricing">Pricing</a><Link href="/signin">Sign in</Link></div><div><b>Trust</b><Link href="/terms">Terms</Link><Link href="/privacy">Privacy</Link><Link href="/safety">Safety</Link></div><div><b>Connect</b><a href="mailto:support.bylldx@gmail.com">support.bylldx@gmail.com</a><small style={{ display: "block", fontSize: 11, color: "var(--muted)", marginTop: 6 }}>Built by Saurabh Singh</small></div><div className="footer-bottom"><span>© 2026 BYLLD X. All rights reserved.</span><span>Made for builders in India · Built by Saurabh Singh</span></div></footer>
     </main>
   );
 }

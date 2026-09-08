@@ -3,7 +3,7 @@ import { useState } from "react";
 
 interface RazorpayCheckoutProps {
   role: "founder" | "investor";
-  onSuccess: () => void;
+  onSuccess: (mode: "mock" | "live") => void;
 }
 
 declare global {
@@ -28,8 +28,21 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
+  const [checkoutMode, setCheckoutMode] = useState<"mock" | "live" | null>(null);
   const [invoiceInfo, setInvoiceInfo] = useState<{ invoiceNumber?: string; startsAt?: string; endsAt?: string } | null>(null);
   const price = role === "investor" ? 310 : 240;
+
+  async function waitForWebhookActivation() {
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      const response = await fetch("/api/payment/create-order", { cache: "no-store" });
+      if (response.ok) {
+        const status = await response.json();
+        if (status.isPremium) return true;
+      }
+      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+    }
+    return false;
+  }
 
   function downloadReceipt() {
     const invNo = invoiceInfo?.invoiceNumber || `BYLLD-${Math.floor(100000 + Math.random() * 900000)}`;
@@ -119,18 +132,23 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
           body: JSON.stringify({ role, orderId: order.orderId }),
         });
         invData = await confirmRes.json();
-      } catch {}
+        if (!confirmRes.ok) throw new Error(invData.error ?? "Could not confirm mock checkout");
+      } catch (confirmError) {
+        setError(confirmError instanceof Error ? confirmError.message : "Could not confirm mock checkout");
+        setLoading(false);
+        return;
+      }
 
       if (typeof window !== "undefined") {
         localStorage.setItem("bylldx_mock_premium", "true");
         localStorage.setItem("bylldx_mock_premium_expiry", (Date.now() + 30 * 86400000).toString());
-        localStorage.removeItem("bylldx_force_free");
       }
 
       setInvoiceInfo(invData);
+      setCheckoutMode("mock");
       setSuccess(true);
       setLoading(false);
-      onSuccess();
+      onSuccess("mock");
       return;
     }
 
@@ -155,15 +173,37 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
         email: order.userEmail,
       },
       theme: { color: "#0c55ed" },
-      handler: function () {
-        if (typeof window !== "undefined") {
-          localStorage.setItem("bylldx_mock_premium", "true");
-          localStorage.setItem("bylldx_mock_premium_expiry", (Date.now() + 30 * 86400000).toString());
-          localStorage.removeItem("bylldx_force_free");
+      handler: async function (response: {
+        razorpay_payment_id: string;
+        razorpay_order_id: string;
+        razorpay_signature: string;
+      }) {
+        setLoading(true);
+        try {
+          const verifyRes = await fetch("/api/payment/verify", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({
+              razorpay_payment_id: response.razorpay_payment_id,
+              razorpay_order_id: response.razorpay_order_id,
+              razorpay_signature: response.razorpay_signature,
+              role,
+            }),
+          });
+          const verifyData = await verifyRes.json();
+          if (!verifyRes.ok || !verifyData.verified) {
+            throw new Error(verifyData.error || "Payment verification failed");
+          }
+
+          setInvoiceInfo(verifyData);
+          setCheckoutMode("live");
+          setSuccess(true);
+          setLoading(false);
+          onSuccess("live");
+        } catch (err) {
+          setError(err instanceof Error ? err.message : "Payment verification failed");
+          setLoading(false);
         }
-        setSuccess(true);
-        setLoading(false);
-        onSuccess();
       },
       modal: {
         ondismiss: function () {
@@ -171,6 +211,14 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
         },
       },
     });
+
+    // Handle payment failure event
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (rzp as any).on?.("payment.failed", function (resp: any) {
+      setError(resp.error?.description || "Payment failed. Please try again.");
+      setLoading(false);
+    });
+
     rzp.open();
   }
 
@@ -187,26 +235,28 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
       >
         <div style={{ fontSize: 32, marginBottom: 8, color: "#22c55e" }}>✓</div>
         <strong style={{ color: "#22c55e", fontSize: 16, display: "block" }}>
-          Premium Activated Successfully!
+          {checkoutMode === "mock" ? "Mock Premium Activated" : "Premium Activated Successfully!"}
         </strong>
         <p style={{ fontSize: 13, color: "var(--muted)", margin: "8px 0 16px" }}>
           Your {role === "founder" ? "Founder" : "Investor"} Premium access is active for 30 days. Limits have been unlocked.
         </p>
-        <button
-          onClick={downloadReceipt}
-          className="button button-small"
-          style={{
-            background: "var(--blue, #0c55ed)",
-            color: "#ffffff",
-            fontWeight: 700,
-            cursor: "pointer",
-            display: "inline-flex",
-            alignItems: "center",
-            gap: 8,
-          }}
-        >
-          📄 Download Test Receipt
-        </button>
+        {checkoutMode === "mock" && (
+          <button
+            onClick={downloadReceipt}
+            className="button button-small"
+            style={{
+              background: "var(--blue, #0c55ed)",
+              color: "#ffffff",
+              fontWeight: 700,
+              cursor: "pointer",
+              display: "inline-flex",
+              alignItems: "center",
+              gap: 8,
+            }}
+          >
+            📄 Download Test Receipt
+          </button>
+        )}
       </div>
     );
   }

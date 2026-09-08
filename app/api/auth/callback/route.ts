@@ -3,89 +3,114 @@ import { createClient } from "../../../../lib/supabase/server";
 import { getPublicOrigin } from "../../../../lib/origin";
 
 /**
- * OAuth callback handler for Google sign-in via Supabase.
- * Supabase redirects here after the user authorises the provider.
- * We exchange the code for a session and redirect to the dashboard.
+ * Exchanges a Supabase PKCE code, preserves the initial account role for new
+ * Google users, and routes incomplete profiles through onboarding.
  */
 export async function GET(request: NextRequest) {
-  const origin = getPublicOrigin(request);
   const { searchParams } = new URL(request.url);
+  const queryOrigin = searchParams.get("origin");
+  const origin = queryOrigin && (
+    queryOrigin.startsWith("http://localhost") ||
+    queryOrigin.startsWith("http://127.0.0.1")
+  )
+    ? queryOrigin
+    : getPublicOrigin(request);
   const code = searchParams.get("code");
-  // Where to send the user after login (passed through state)
-  const next = searchParams.get("next") ?? "/dashboard";
+  const requestedNext = searchParams.get("next") ?? "/dashboard";
+  const next = requestedNext.startsWith("/") && !requestedNext.startsWith("//")
+    ? requestedNext
+    : "/dashboard";
 
-  if (code) {
-    const supabase = await createClient();
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
-    if (!error) {
-      // Determine the user's role so we can redirect correctly
-      const { data: { user } } = await supabase.auth.getUser();
-      if (user) {
-        const roleFromQuery = searchParams.get("role") as "founder" | "investor" | null;
-        const roleFromCookie = request.cookies.get("bylld_role")?.value as "founder" | "investor" | null;
-        const requestedRole = (roleFromQuery === "investor" || roleFromCookie === "investor")
-          ? "investor"
-          : (roleFromQuery === "founder" || roleFromCookie === "founder")
-          ? "founder"
-          : null;
+  if (!code) {
+    return NextResponse.redirect(new URL("/signin?error=auth_failed", origin));
+  }
 
-        const { data: userRecord } = await supabase
+  const supabase = await createClient();
+  const { error: exchangeError } = await supabase.auth.exchangeCodeForSession(code);
+  if (exchangeError) {
+    return NextResponse.redirect(new URL("/signin?error=auth_failed", origin));
+  }
+
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) {
+    return NextResponse.redirect(new URL("/signin?error=auth_failed", origin));
+  }
+
+  const roleFromQuery = searchParams.get("role");
+  const roleFromCookie = request.cookies.get("bylld_role")?.value;
+  const requestedRole = roleFromQuery === "investor" || roleFromQuery === "founder"
+    ? roleFromQuery
+    : roleFromCookie === "investor" || roleFromCookie === "founder"
+      ? roleFromCookie
+      : null;
+
+  // Retrieve user record from public.users
+  const { data: existingUserRecord } = await supabase
+    .from("users")
+    .select("id, role, onboarding_completed_at")
+    .eq("id", user.id)
+    .maybeSingle();
+
+  let finalRole: "founder" | "investor" = requestedRole === "investor" ? "investor" : "founder";
+  let isNewUser = true;
+
+  const fullName = (
+    user.user_metadata?.full_name ||
+    user.user_metadata?.name ||
+    user.email?.split("@")[0] ||
+    "Member"
+  );
+
+  if (!existingUserRecord) {
+    // If public.users row doesn't exist yet, insert it immediately with the requested role
+    await supabase.from("users").insert({
+      id: user.id,
+      email: user.email,
+      role: finalRole,
+      full_name: fullName,
+    });
+    isNewUser = true;
+  } else {
+    isNewUser = !existingUserRecord.onboarding_completed_at;
+    if (!isNewUser) {
+      // Once onboarding is completed, respect their persisted role
+      finalRole = existingUserRecord.role === "investor" ? "investor" : "founder";
+    } else if (requestedRole && requestedRole !== existingUserRecord.role) {
+      // User is still new, allow them to adopt their selected role
+      try {
+        await supabase
           .from("users")
-          .select("id, role, full_name")
-          .eq("id", user.id)
-          .maybeSingle();
-
-        let finalRole: "founder" | "investor" = "founder";
-
-        if (!userRecord) {
-          finalRole = requestedRole || "founder";
-          const fullName =
-            user.user_metadata?.full_name ||
-            user.user_metadata?.name ||
-            user.email?.split("@")[0] ||
-            (finalRole === "founder" ? "Founder" : "Investor");
-
-          try {
-            await supabase.from("users").insert({
-              id: user.id,
-              email: user.email,
-              full_name: fullName,
-              role: finalRole,
-              account_status: "active",
-            });
-          } catch {}
-
-          try {
-            await supabase.from("profiles").upsert({
-              user_id: user.id,
-              full_name: fullName,
-              is_discoverable: true,
-              completion_percent: 50,
-            });
-          } catch {}
-        } else {
-          if (requestedRole && requestedRole !== userRecord.role) {
-            finalRole = requestedRole;
-            try {
-              await supabase.from("users").update({ role: finalRole }).eq("id", user.id);
-            } catch {}
-          } else {
-            finalRole = (userRecord.role as "founder" | "investor") || requestedRole || "founder";
-          }
-        }
-
-        const redirectTarget = next.startsWith("/dashboard")
-          ? `${next}${next.includes("?") ? "&" : "?"}role=${finalRole}`
-          : next;
-
-        const response = NextResponse.redirect(new URL(redirectTarget, origin));
-        response.cookies.set("bylld_role", finalRole, { path: "/", maxAge: 60 * 60 * 24 * 30 });
-        return response;
+          .update({ role: requestedRole, updated_at: new Date().toISOString() })
+          .eq("id", user.id);
+        finalRole = requestedRole;
+      } catch {
+        finalRole = requestedRole;
       }
-      return NextResponse.redirect(new URL(next, origin));
+    } else {
+      finalRole = existingUserRecord.role === "investor" ? "investor" : "founder";
     }
   }
 
-  // Something went wrong — go back to sign-in with an error flag
-  return NextResponse.redirect(new URL("/signin?error=auth_failed", origin));
+  // Ensure a minimal profile exists so Discover & Profile queries never throw 404
+  try {
+    await supabase.from("profiles").upsert(
+      { user_id: user.id, full_name: fullName },
+      { onConflict: "user_id" }
+    );
+  } catch {}
+
+  const redirectTarget = isNewUser
+    ? `/onboarding?role=${finalRole}`
+    : next.startsWith("/dashboard")
+      ? `${next}${next.includes("?") ? "&" : "?"}role=${finalRole}`
+      : next;
+
+  const response = NextResponse.redirect(new URL(redirectTarget, origin));
+  response.cookies.set("bylld_role", finalRole, {
+    path: "/",
+    maxAge: 60 * 60 * 24 * 30,
+    sameSite: "lax",
+    secure: origin.startsWith("https://"),
+  });
+  return response;
 }

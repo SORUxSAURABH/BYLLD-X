@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
-import { FormEvent, useState } from "react";
+import { FormEvent, useState, useEffect } from "react";
 import { createClient } from "../../lib/supabase/browser";
 import { hasSupabaseConfig } from "../../lib/supabase/config";
 
@@ -20,9 +20,39 @@ export default function AuthPanel({ mode }: { mode: "signin" | "join" }) {
     return "founder";
   });
   const [message, setMessage] = useState("");
-  const [error, setError] = useState("");
+  const [error, setError] = useState(() => {
+    const err = params.get("error");
+    if (!err) return "";
+    if (err === "auth_failed") return "Authentication could not be completed. Please try again.";
+    if (err === "profile_setup_failed") return "Account setup was interrupted. Please try again.";
+    if (err === "role_setup_failed") return "Role assignment issue. Please try again.";
+    return "Authentication message: " + err;
+  });
   const [loading, setLoading] = useState(false);
+  const [currentEmail, setCurrentEmail] = useState<string | null>(null);
   const signin = mode === "signin";
+
+  useEffect(() => {
+    if (!supabaseReady) return;
+    const supabase = createClient();
+    supabase.auth.getUser().then(({ data: { user } }) => {
+      if (user?.email) setCurrentEmail(user.email);
+    }).catch(() => {});
+  }, []);
+
+  async function handleSignOutActive() {
+    if (!supabaseReady) return;
+    try {
+      const supabase = createClient();
+      await supabase.auth.signOut();
+      localStorage.removeItem("bylld_user_role");
+      localStorage.removeItem("bylld_auth_user");
+      localStorage.removeItem("bylld_profile_founder");
+      localStorage.removeItem("bylld_profile_investor");
+      setCurrentEmail(null);
+      setMessage("Logged out cleanly. You can now create a new account or sign in.");
+    } catch {}
+  }
 
   function handleRoleChange(newRole: "founder" | "investor") {
     setRole(newRole);
@@ -67,9 +97,14 @@ export default function AuthPanel({ mode }: { mode: "signin" | "join" }) {
     } catch {}
 
     const supabase = createClient();
-    const callbackUrl = new URL(`${getSiteUrl()}/api/auth/callback`);
+    const siteUrl = getSiteUrl();
+    const callbackUrl = new URL(`${siteUrl}/api/auth/callback`);
     callbackUrl.searchParams.set("next", "/dashboard");
     callbackUrl.searchParams.set("role", role);
+    callbackUrl.searchParams.set("origin", siteUrl);
+    if (!signin) {
+      callbackUrl.searchParams.set("from_join", "true");
+    }
 
     const { error: oauthError } = await supabase.auth.signInWithOAuth({
       provider,
@@ -103,25 +138,39 @@ export default function AuthPanel({ mode }: { mode: "signin" | "join" }) {
     const supabase = createClient();
 
     if (signin) {
+      // Clear any prior conflicting session
+      try { await supabase.auth.signOut(); } catch {}
+
       const { data, error: signInError } = await supabase.auth.signInWithPassword({ email, password });
       if (signInError) {
-        setError(signInError.message);
+        if (signInError.message.toLowerCase().includes("email not confirmed")) {
+          setError("Email not confirmed yet. Please verify your email inbox, or click '1-Click Test' below to test immediately!");
+        } else {
+          setError(signInError.message);
+        }
         setLoading(false);
         return;
       }
-      // Fetch the user's role from DB
+      // Returning accounts always use their registered database role.
       const { data: userRecord } = await supabase
         .from("users")
-        .select("role")
+        .select("role, onboarding_completed_at")
         .eq("id", data.user.id)
-        .single();
-      const targetRole = userRecord?.role || role;
+        .maybeSingle();
+      const targetRole = userRecord?.role === "investor" ? "investor" : "founder";
       try {
         localStorage.setItem("bylld_user_role", targetRole);
         document.cookie = `bylld_role=${targetRole}; path=/; max-age=${60 * 60 * 24 * 30}`;
       } catch {}
-      router.push(getRedirectTarget(targetRole));
+      router.push(
+        userRecord?.onboarding_completed_at
+          ? getRedirectTarget(targetRole)
+          : `/onboarding?role=${targetRole}`
+      );
     } else {
+      // Clear any prior conflicting session before registering
+      try { await supabase.auth.signOut(); } catch {}
+
       const fullName = (form.elements.namedItem("fullName") as HTMLInputElement)?.value ?? "";
       const { data, error: signUpError } = await supabase.auth.signUp({
         email,
@@ -136,24 +185,13 @@ export default function AuthPanel({ mode }: { mode: "signin" | "join" }) {
         setLoading(false);
         return;
       }
-      if (data.user) {
-        try {
-          await supabase.from("users").upsert({
-            id: data.user.id,
-            email: data.user.email,
-            full_name: fullName || (role === "founder" ? "Founder" : "Investor"),
-            role,
-            account_status: "active",
-          });
-        } catch {}
-      }
       if (data.user && !data.session) {
         // Email confirmation required
-        setMessage("Check your email to confirm your account, then sign in.");
+        setMessage("Account created! A confirmation link was sent to your email. (Or click '1-Click Test' below to test right now without waiting!)");
         setLoading(false);
         return;
       }
-      router.push(getRedirectTarget());
+      router.push(`/onboarding?role=${role}`);
     }
   }
 
@@ -210,6 +248,40 @@ export default function AuthPanel({ mode }: { mode: "signin" | "join" }) {
               : "Select your role below to get personalized access for Founders or Investors."}
           </p>
 
+          {currentEmail && (
+            <div
+              style={{
+                background: "rgba(12, 85, 237, 0.08)",
+                border: "1px solid rgba(12, 85, 237, 0.25)",
+                borderRadius: 10,
+                padding: "10px 14px",
+                margin: "14px 0",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "space-between",
+                fontSize: 12,
+                color: "var(--navy)",
+              }}
+            >
+              <span>Currently signed in as <strong>{currentEmail}</strong></span>
+              <button
+                type="button"
+                onClick={handleSignOutActive}
+                style={{
+                  background: "none",
+                  border: "none",
+                  color: "#dc2626",
+                  fontWeight: 700,
+                  cursor: "pointer",
+                  fontSize: 12,
+                  textDecoration: "underline",
+                }}
+              >
+                Sign out
+              </button>
+            </div>
+          )}
+
           {/* Prominent Role Selector for BOTH Google and Email */}
           <div style={{ margin: "16px 0 18px" }}>
             <span style={{ fontSize: 11, fontWeight: 800, letterSpacing: "0.06em", color: "var(--navy)", textTransform: "uppercase", display: "block", marginBottom: 8 }}>
@@ -247,11 +319,6 @@ export default function AuthPanel({ mode }: { mode: "signin" | "join" }) {
                   <strong style={{ fontSize: 13, color: role === "founder" ? "#0c55ed" : "var(--navy)" }}>
                     🚀 Founder
                   </strong>
-                  {role === "founder" && (
-                    <span style={{ fontSize: 9, fontWeight: 800, color: "#0c55ed", background: "#eef4ff", padding: "1px 5px", borderRadius: 4 }}>
-                      ACTIVE
-                    </span>
-                  )}
                 </div>
                 <small style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.3 }}>
                   Showcase startups & raise
@@ -279,11 +346,6 @@ export default function AuthPanel({ mode }: { mode: "signin" | "join" }) {
                   <strong style={{ fontSize: 13, color: role === "investor" ? "#0c55ed" : "var(--navy)" }}>
                     💼 Investor
                   </strong>
-                  {role === "investor" && (
-                    <span style={{ fontSize: 9, fontWeight: 800, color: "#0c55ed", background: "#eef4ff", padding: "1px 5px", borderRadius: 4 }}>
-                      ACTIVE
-                    </span>
-                  )}
                 </div>
                 <small style={{ fontSize: 10, color: "var(--muted)", lineHeight: 1.3 }}>
                   Discover deals & deploy capital

@@ -1,16 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { createClient } from "../../../lib/supabase/server";
+
+type IdeaStatus = "draft" | "active" | "inactive" | "removed";
 
 interface CreateIdeaBody {
   title: string;
   teaser: string;
   funding_requested_inr: number;
   startup_stage: string;
-  status?: "draft" | "active" | "archived";
+  status?: IdeaStatus;
   is_primary?: boolean;
   problem?: string;
   proposed_solution?: string;
   supporting_details?: string;
+}
+
+async function getFounderTier(supabase: SupabaseClient, userId: string) {
+  const { data: account, error: accountError } = await supabase
+    .from("users")
+    .select("role")
+    .eq("id", userId)
+    .single();
+
+  if (accountError || account?.role !== "founder") return null;
+
+  const now = new Date().toISOString();
+  const { data: subscription } = await supabase
+    .from("subscriptions")
+    .select("id")
+    .eq("user_id", userId)
+    .eq("tier", "premium")
+    .lte("starts_at", now)
+    .gt("ends_at", now)
+    .limit(1)
+    .maybeSingle();
+
+  const isPremium = Boolean(subscription);
+  return { isPremium, maxActiveIdeas: isPremium ? 5 : 3 };
+}
+
+async function hasActiveSlot(
+  supabase: SupabaseClient,
+  userId: string,
+  maxActiveIdeas: number,
+  excludedIdeaId?: string,
+) {
+  let query = supabase
+    .from("ideas")
+    .select("id", { count: "exact", head: true })
+    .eq("founder_id", userId)
+    .eq("status", "active");
+  if (excludedIdeaId) query = query.neq("id", excludedIdeaId);
+  const { count, error } = await query;
+  if (error) throw new Error(error.message);
+  return (count ?? 0) < maxActiveIdeas;
 }
 
 /**
@@ -23,6 +67,11 @@ export async function GET() {
 
   if (authError || !user) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+  }
+
+  const tier = await getFounderTier(supabase, user.id);
+  if (!tier) {
+    return NextResponse.json({ error: "Founder account required" }, { status: 403 });
   }
 
   // Fetch ideas for this founder
@@ -54,18 +103,7 @@ export async function GET() {
   }
 
   // Check user subscription tier
-  const now = new Date().toISOString();
-  const { data: sub } = await supabase
-    .from("subscriptions")
-    .select("tier")
-    .eq("user_id", user.id)
-    .eq("tier", "premium")
-    .gt("ends_at", now)
-    .limit(1)
-    .single();
-
-  const isPremium = Boolean(sub);
-  const maxActiveIdeas = isPremium ? 5 : 3;
+  const { isPremium, maxActiveIdeas } = tier;
   const activeCount = (ideas ?? []).filter((i) => i.status === "active").length;
 
   return NextResponse.json({
@@ -104,6 +142,11 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const tier = await getFounderTier(supabase, user.id);
+  if (!tier) {
+    return NextResponse.json({ error: "Founder account required" }, { status: 403 });
+  }
+
   let body: CreateIdeaBody;
   try {
     body = await req.json();
@@ -122,6 +165,10 @@ export async function POST(req: NextRequest) {
     proposed_solution = "",
     supporting_details = "",
   } = body;
+
+  if (!(["draft", "active", "inactive", "removed"] as IdeaStatus[]).includes(status)) {
+    return NextResponse.json({ error: "Invalid idea status" }, { status: 400 });
+  }
 
   // Validation according to schema constraints
   if (!title || title.trim().length < 2 || title.trim().length > 120) {
@@ -142,26 +189,9 @@ export async function POST(req: NextRequest) {
 
   // Check active limit
   if (status === "active") {
-    const now = new Date().toISOString();
-    const { data: sub } = await supabase
-      .from("subscriptions")
-      .select("tier")
-      .eq("user_id", user.id)
-      .eq("tier", "premium")
-      .gt("ends_at", now)
-      .limit(1)
-      .single();
-
-    const maxActive = sub ? 5 : 3;
-    const { count } = await supabase
-      .from("ideas")
-      .select("id", { count: "exact", head: true })
-      .eq("founder_id", user.id)
-      .eq("status", "active");
-
-    if ((count ?? 0) >= maxActive) {
+    if (!(await hasActiveSlot(supabase, user.id, tier.maxActiveIdeas))) {
       return NextResponse.json(
-        { error: `Active idea limit reached (${maxActive}). Archive or deactivate an existing idea or upgrade to Premium.` },
+        { error: `Active idea limit reached (${tier.maxActiveIdeas}). Hide an existing idea or upgrade to Premium.` },
         { status: 400 }
       );
     }
@@ -226,6 +256,11 @@ export async function PATCH(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   }
 
+  const tier = await getFounderTier(supabase, user.id);
+  if (!tier) {
+    return NextResponse.json({ error: "Founder account required" }, { status: 403 });
+  }
+
   let body: Partial<CreateIdeaBody> & { id: string; action?: "make_primary" | "toggle_status" };
   try {
     body = await req.json();
@@ -241,7 +276,7 @@ export async function PATCH(req: NextRequest) {
   // Ensure idea belongs to user
   const { data: existing, error: fetchError } = await supabase
     .from("ideas")
-    .select("id, status, is_primary")
+    .select("id, title, teaser, status, is_primary")
     .eq("id", id)
     .eq("founder_id", user.id)
     .single();
@@ -252,6 +287,12 @@ export async function PATCH(req: NextRequest) {
 
   // Handle make_primary quick action
   if (body.action === "make_primary") {
+    if (existing.status !== "active" && !(await hasActiveSlot(supabase, user.id, tier.maxActiveIdeas, id))) {
+      return NextResponse.json(
+        { error: `Active idea limit reached (${tier.maxActiveIdeas}). Hide an existing idea or upgrade to Premium.` },
+        { status: 400 },
+      );
+    }
     // Unset all other primary ideas for this founder
     await supabase
       .from("ideas")
@@ -274,25 +315,9 @@ export async function PATCH(req: NextRequest) {
   if (body.action === "toggle_status") {
     const nextStatus = existing.status === "active" ? "draft" : "active";
     if (nextStatus === "active") {
-      const now = new Date().toISOString();
-      const { data: sub } = await supabase
-        .from("subscriptions")
-        .select("tier")
-        .eq("user_id", user.id)
-        .eq("tier", "premium")
-        .gt("ends_at", now)
-        .limit(1)
-        .single();
-      const maxActive = sub ? 5 : 3;
-      const { count } = await supabase
-        .from("ideas")
-        .select("id", { count: "exact", head: true })
-        .eq("founder_id", user.id)
-        .eq("status", "active");
-
-      if ((count ?? 0) >= maxActive) {
+      if (!(await hasActiveSlot(supabase, user.id, tier.maxActiveIdeas, id))) {
         return NextResponse.json(
-          { error: `Active idea limit reached (${maxActive}). Upgrade to Premium for 5 active ideas.` },
+          { error: `Active idea limit reached (${tier.maxActiveIdeas}). Upgrade to Premium for 5 active ideas.` },
           { status: 400 }
         );
       }
@@ -349,11 +374,27 @@ export async function PATCH(req: NextRequest) {
   }
 
   if (body.status !== undefined) {
+    if (!(["draft", "active", "inactive", "removed"] as IdeaStatus[]).includes(body.status)) {
+      return NextResponse.json({ error: "Invalid idea status" }, { status: 400 });
+    }
+    if (body.status === "active" && existing.status !== "active") {
+      if (!(await hasActiveSlot(supabase, user.id, tier.maxActiveIdeas, id))) {
+        return NextResponse.json(
+          { error: `Active idea limit reached (${tier.maxActiveIdeas}). Hide an existing idea or upgrade to Premium.` },
+          { status: 400 },
+        );
+      }
+    }
     updatePayload.status = body.status;
+    if (body.status !== "active") updatePayload.is_primary = false;
   }
 
   if (body.is_primary !== undefined) {
     if (body.is_primary) {
+      const resultingStatus = body.status ?? existing.status;
+      if (resultingStatus !== "active") {
+        return NextResponse.json({ error: "Only a visible idea can be primary" }, { status: 400 });
+      }
       await supabase
         .from("ideas")
         .update({ is_primary: false })
@@ -378,7 +419,7 @@ export async function PATCH(req: NextRequest) {
       .upsert({
         idea_id: id,
         founder_id: user.id,
-        full_description: `${body.title ?? ""}: ${body.teaser ?? ""}`,
+        full_description: `${body.title ?? existing.title}: ${body.teaser ?? existing.teaser}`,
         problem: body.problem ?? "",
         proposed_solution: body.proposed_solution ?? "",
         supporting_details: body.supporting_details ?? null,

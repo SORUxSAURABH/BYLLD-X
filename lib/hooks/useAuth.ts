@@ -43,54 +43,64 @@ export function useAuth() {
         return;
       }
 
-      // Fetch role from the public users table
-      const { data: record } = await supabase
-        .from("users")
-        .select("role")
-        .eq("id", supabaseUser.id)
-        .single();
+      try {
+        // Fetch role and full_name from public.users table
+        const { data: record } = await supabase
+          .from("users")
+          .select("role, full_name")
+          .eq("id", supabaseUser.id)
+          .maybeSingle();
 
-      // Check active subscription from the subscriptions table
-      const now = new Date().toISOString();
-      const { data: sub } = await supabase
-        .from("subscriptions")
-        .select("tier")
-        .eq("user_id", supabaseUser.id)
-        .eq("tier", "premium")
-        .gt("ends_at", now)
-        .limit(1)
-        .maybeSingle();
+        // Check active subscription from subscriptions table
+        const now = new Date().toISOString();
+        const { data: sub } = await supabase
+          .from("subscriptions")
+          .select("tier")
+          .eq("user_id", supabaseUser.id)
+          .eq("tier", "premium")
+          .lte("starts_at", now)
+          .gt("ends_at", now)
+          .limit(1)
+          .maybeSingle();
 
-      // Fetch profile for real full_name & completion percentage
-      const { data: profile } = await supabase
-        .from("profiles")
-        .select("full_name, completion_percent")
-        .eq("user_id", supabaseUser.id)
-        .single();
+        // Fetch profile for real full_name & completion percentage
+        const { data: profile } = await supabase
+          .from("profiles")
+          .select("full_name, completion_percent")
+          .eq("user_id", supabaseUser.id)
+          .maybeSingle();
 
-      const role = (record?.role ?? "founder") as "founder" | "investor";
-      const isPremium = Boolean(sub);
+        const role = (record?.role ?? (supabaseUser.user_metadata?.role as string) ?? "founder") as "founder" | "investor";
+        const isPremium = Boolean(sub);
 
-      const fullName =
-        profile?.full_name ||
-        (supabaseUser.user_metadata?.full_name as string | undefined) ||
-        supabaseUser.email?.split("@")[0] ||
-        "Member";
+        // Full name resolution: DB profile > public.users record > Supabase auth metadata > fallback to email handle
+        const fullName =
+          profile?.full_name ||
+          record?.full_name ||
+          (supabaseUser.user_metadata?.full_name as string | undefined) ||
+          supabaseUser.email?.split("@")[0] ||
+          (role === "founder" ? "Founder Member" : "Investor Member");
 
-      setUser({
-        id: supabaseUser.id,
-        email: supabaseUser.email ?? "",
-        fullName,
-        role,
-        initials: toInitials(fullName),
-        isPremium,
-        completionPercent: profile?.completion_percent ?? 0,
-      });
-      setLoading(false);
+        setUser({
+          id: supabaseUser.id,
+          email: supabaseUser.email ?? "",
+          fullName,
+          role,
+          initials: toInitials(fullName),
+          isPremium,
+          completionPercent: profile?.completion_percent ?? 50,
+        });
+      } catch (err) {
+        console.error("Error loading user profile:", err);
+      } finally {
+        setLoading(false);
+      }
     }
 
     // Load current session immediately
-    supabase.auth.getUser().then(({ data: { user: u } }) => loadUser(u));
+    supabase.auth.getUser()
+      .then(({ data: { user: u } }) => loadUser(u))
+      .catch(() => setLoading(false));
 
     // Subscribe to auth changes (sign-in / sign-out / token refresh)
     const {

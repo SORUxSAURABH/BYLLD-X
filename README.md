@@ -21,14 +21,14 @@ The deployed public preview contains fictional data and no secrets. To accept re
 2. Copy `.env.example` to `.env.local` and add the project URL and publishable key.
 3. Review and apply the migration under `supabase/migrations`.
 4. Enable Google and GitHub providers and configure exact redirect URLs.
-5. Implement the server transaction layer for weekly counters, connection state, message permissions, subscription expiry and verified payment webhooks.
+5. Add `SUPABASE_SECRET_KEY` (or the legacy service-role key) only to the server environment when enabling live payment fulfillment.
 6. Run Supabase security and performance advisors before enabling public registration.
 
 Never put a Supabase secret/service-role key or payment webhook secret in a `NEXT_PUBLIC_` variable.
 
 ## Payment status
 
-Checkout is intentionally in mock/test mode. No real payment provider is represented as active. A provider adapter can later support UPI, cards, net banking and wallets after merchant credentials and signed webhook verification are configured.
+Checkout automatically uses local mock mode while `RAZORPAY_KEY_ID` and `RAZORPAY_KEY_SECRET` are blank. To enable live monthly checkout, configure both keys, `RAZORPAY_WEBHOOK_SECRET`, and a server-only Supabase secret, then register `/api/payment/webhook` for Razorpay's `payment.captured` event. The verified webhook activates Founder Premium at ₹240/month or Investor Premium at ₹310/month; browser callbacks never grant live Premium directly.
 
 ## Verification
 

@@ -1,5 +1,5 @@
-const FALLBACK_SUPABASE_URL = "https://ourpauaxcqdqvpjvzhxo.supabase.co";
-const FALLBACK_SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im91cnBhdWF4Y3FkcXZwanZ6aHhvIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg1MzIwMzYsImV4cCI6MjEwNDEwODAzNn0.CxNK8QJxNTLI84CPLobWVYfwUVe2XDUY3H7Dy6i6F28";
+const FALLBACK_SUPABASE_URL = "https://yszkarazdwhwstivovxx.supabase.co";
+const FALLBACK_SUPABASE_PUBLISHABLE_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InlzemthcmF6ZHdod3N0aXZvdnh4Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODg4MDM2MzYsImV4cCI6MjEwNDM3OTYzNn0.XSxct6gWK8hbPts1sUhuC4gam8klOv_iZmJ8eLu1AIk";
 
 export function hasSupabaseConfig() {
   return true;

@@ -9,7 +9,7 @@ interface Idea {
   teaser: string;
   funding_requested_inr: number;
   startup_stage: string;
-  status: "draft" | "active" | "archived";
+  status: "draft" | "active" | "inactive" | "removed";
   is_primary: boolean;
   created_at: string;
   updated_at: string;
@@ -207,12 +207,12 @@ export default function IdeasView({
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ id, action: "make_primary" }),
       });
-      if (res.ok) {
-        notify("Primary idea updated");
-        await loadIdeas();
-      }
-    } catch {
-      notify("Failed to update primary idea");
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Failed to update primary idea");
+      notify("Primary idea updated");
+      await loadIdeas();
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Failed to update primary idea");
     }
   }
 
@@ -366,14 +366,14 @@ export default function IdeasView({
                         onClick={() => handleMakePrimary(idea.id)}
                         style={{ fontSize: 11, padding: "5px 9px", background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, cursor: "pointer", color: "inherit" }}
                       >
-                        Make primary
+                        Set as Primary
                       </button>
                     )}
                     <button
                       onClick={() => handleToggleStatus(idea.id)}
                       style={{ fontSize: 11, padding: "5px 9px", background: "none", border: "1px solid rgba(255,255,255,0.15)", borderRadius: 6, cursor: "pointer", color: "inherit" }}
                     >
-                      {idea.status === "active" ? "Deactivate" : "Activate"}
+                      {idea.status === "active" ? "Hide from showcase" : "Show in showcase"}
                     </button>
                     <button
                       className="primary"

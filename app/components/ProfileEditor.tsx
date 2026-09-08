@@ -40,43 +40,13 @@ interface ProfileData {
 }
 
 const FOUNDER_DEFAULT: ProfileData = {
-  full_name: "Arjun Mehta",
-  headline: "Climate Tech & Clean Energy Founder",
-  bio: "Building scalable EV charging and battery telemetry infrastructure for Indian commercial fleets across tier 1 and tier 2 hubs.",
-  location: "Bengaluru, India",
-  website_url: "https://voltfleet.tech",
+  full_name: "",
+  headline: "",
+  bio: "",
+  location: "",
+  website_url: "",
   is_discoverable: true,
-  completion_percent: 85,
-  founder_role: "CEO & Co-founder",
-  years_experience: "6",
-  prior_startups: "1",
-  startup_name: "VoltFleet Energy",
-  startup_stage: "Seed / Revenue Stage",
-  startup_sector: "ClimateTech & Clean Energy",
-  traction_metric: "₹4.5L MRR · 16 fleet pilots active across Bengaluru & Pune",
-  pitch_deck_url: "https://deck.voltfleet.tech/preview",
-  team_size: "6 full-time engineers & operators",
-  funding_goal_inr: "67000",
-  equity_offered: "5% - 7.5%",
-  firm_name: "",
-  investor_type: "",
-  min_investment_inr: "20000",
-  max_investment_inr: "1000000",
-  target_stages: [],
-  target_sectors: [],
-  value_add_tags: [],
-  deals_per_year: "",
-  investment_thesis: "",
-};
-
-const INVESTOR_DEFAULT: ProfileData = {
-  full_name: "Neha Kapoor",
-  headline: "Angel Investor & Venture Partner · Mumbai",
-  bio: "Backing early-stage B2B SaaS, CleanTech, and consumer brands with sustainable unit economics and passionate founding teams.",
-  location: "Mumbai, India",
-  website_url: "https://nehakapoor.vc",
-  is_discoverable: true,
-  completion_percent: 92,
+  completion_percent: 30,
   founder_role: "",
   years_experience: "",
   prior_startups: "0",
@@ -88,15 +58,45 @@ const INVESTOR_DEFAULT: ProfileData = {
   team_size: "",
   funding_goal_inr: "",
   equity_offered: "",
-  firm_name: "Kapoor Ventures / Angel Syndicate",
-  investor_type: "Angel Investor & Syndicate Lead",
-  min_investment_inr: "50000",
-  max_investment_inr: "2500000",
-  target_stages: ["Pre-seed", "Seed", "Pre-Series A"],
-  target_sectors: ["B2B SaaS", "ClimateTech", "AI & DeepTech", "FinTech"],
-  value_add_tags: ["⚡ Go-To-Market & Sales", "🤝 Tier-1 VC Follow-on Intros", "🛠 Tech & System Architecture"],
-  deals_per_year: "4 - 6 investments / year",
-  investment_thesis: "Backing technical founders building defensible technology in high-growth Indian sectors with demonstrable product-market fit.",
+  firm_name: "",
+  investor_type: "",
+  min_investment_inr: "",
+  max_investment_inr: "",
+  target_stages: [],
+  target_sectors: [],
+  value_add_tags: [],
+  deals_per_year: "",
+  investment_thesis: "",
+};
+
+const INVESTOR_DEFAULT: ProfileData = {
+  full_name: "",
+  headline: "",
+  bio: "",
+  location: "",
+  website_url: "",
+  is_discoverable: true,
+  completion_percent: 30,
+  founder_role: "",
+  years_experience: "",
+  prior_startups: "0",
+  startup_name: "",
+  startup_stage: "",
+  startup_sector: "",
+  traction_metric: "",
+  pitch_deck_url: "",
+  team_size: "",
+  funding_goal_inr: "",
+  equity_offered: "",
+  firm_name: "",
+  investor_type: "",
+  min_investment_inr: "",
+  max_investment_inr: "",
+  target_stages: [],
+  target_sectors: [],
+  value_add_tags: [],
+  deals_per_year: "",
+  investment_thesis: "",
 };
 
 const SECTORS_LIST = [
@@ -151,7 +151,43 @@ export default function ProfileEditor({
 }) {
   const isFounder = role === "founder";
   const defaultData = isFounder ? FOUNDER_DEFAULT : INVESTOR_DEFAULT;
-  const [form, setForm] = useState<ProfileData>(defaultData);
+
+  // For authenticated users, start with their real name and clean inputs (placeholders will guide them)
+  const [form, setForm] = useState<ProfileData>(() => {
+    if (authUser) {
+      return {
+        full_name: authUser.fullName || "",
+        headline: "",
+        bio: "",
+        location: "",
+        website_url: "",
+        is_discoverable: true,
+        completion_percent: authUser.completionPercent || 30,
+        founder_role: "",
+        years_experience: "",
+        prior_startups: "0",
+        startup_name: "",
+        startup_stage: "",
+        startup_sector: "",
+        traction_metric: "",
+        pitch_deck_url: "",
+        team_size: "",
+        funding_goal_inr: "",
+        equity_offered: "",
+        firm_name: "",
+        investor_type: "",
+        min_investment_inr: "",
+        max_investment_inr: "",
+        target_stages: [],
+        target_sectors: [],
+        value_add_tags: [],
+        deals_per_year: "",
+        investment_thesis: "",
+      };
+    }
+    return defaultData;
+  });
+
   const [photoUrl, setPhotoUrl] = useState<string | null>(null);
   const [photoPath, setPhotoPath] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
@@ -162,55 +198,66 @@ export default function ProfileEditor({
 
   /* ---- Load profile on mount ---- */
   useEffect(() => {
-    try {
-      const saved = localStorage.getItem(`bylld_profile_${role}`);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        setForm(parsed);
-        if (parsed.full_name && onProfileUpdate) onProfileUpdate(parsed.full_name);
-      } else {
-        setForm(isFounder ? FOUNDER_DEFAULT : INVESTOR_DEFAULT);
-      }
-      const savedPhoto = localStorage.getItem(`bylld_photo_${role}`);
-      if (savedPhoto) setPhotoUrl(savedPhoto);
-    } catch {
+    // 1. If user is authenticated, clear any legacy stale generic profile cache
+    if (authUser) {
+      try {
+        localStorage.removeItem(`bylld_profile_${role}`);
+      } catch {}
+    } else {
+      // If previewing without auth, set defaults
       setForm(isFounder ? FOUNDER_DEFAULT : INVESTOR_DEFAULT);
-    }
-
-    const isDbBound = Boolean(authUser && authUser.role === role);
-    if (!isDbBound) {
       setLoading(false);
       return;
     }
 
-    fetch("/api/profile")
+    // 2. Fetch authenticated user profile from backend with explicit role
+    fetch(`/api/profile?role=${role}`)
       .then((r) => r.json())
       .then(({ profile, roleProfile, photoUrl: pUrl }) => {
         if (profile) {
           setForm((prev) => ({
             ...prev,
-            full_name: profile.full_name ?? prev.full_name,
-            headline: profile.headline ?? prev.headline,
-            bio: profile.bio ?? prev.bio,
-            location: profile.location ?? prev.location,
-            website_url: profile.website_url ?? prev.website_url,
+            full_name: profile.full_name || authUser.fullName || prev.full_name,
+            headline: profile.headline ?? "",
+            bio: profile.bio ?? "",
+            location: profile.location ?? "",
+            website_url: profile.website_url ?? "",
             is_discoverable: profile.is_discoverable ?? true,
-            completion_percent: profile.completion_percent ?? 85,
+            completion_percent: profile.completion_percent ?? prev.completion_percent,
           }));
           if (profile.full_name && onProfileUpdate) onProfileUpdate(profile.full_name);
+        } else if (authUser.fullName) {
+          setForm((prev) => ({ ...prev, full_name: authUser.fullName }));
         }
+
         if (roleProfile) {
           setForm((prev) => ({
             ...prev,
-            founder_role: roleProfile.founder_role ?? prev.founder_role,
-            years_experience: String(roleProfile.years_experience ?? prev.years_experience),
-            prior_startups: String(roleProfile.prior_startups ?? prev.prior_startups),
-            investor_type: roleProfile.investor_type ?? prev.investor_type,
-            min_investment_inr: String(roleProfile.min_investment_inr ?? prev.min_investment_inr),
-            max_investment_inr: String(roleProfile.max_investment_inr ?? prev.max_investment_inr),
-            investment_thesis: roleProfile.investment_thesis ?? prev.investment_thesis,
+            // Founder fields
+            founder_role: roleProfile.founder_role ?? "",
+            years_experience: roleProfile.years_experience != null ? String(roleProfile.years_experience) : "",
+            prior_startups: roleProfile.prior_startups != null ? String(roleProfile.prior_startups) : "0",
+            startup_name: roleProfile.startup_name ?? "",
+            startup_stage: roleProfile.startup_stage ?? "",
+            startup_sector: roleProfile.startup_sector ?? "",
+            traction_metric: roleProfile.traction_metric ?? "",
+            pitch_deck_url: roleProfile.pitch_deck_url ?? "",
+            team_size: roleProfile.team_size ?? "",
+            funding_goal_inr: roleProfile.funding_goal_inr ?? "",
+            equity_offered: roleProfile.equity_offered ?? "",
+            // Investor fields
+            firm_name: roleProfile.firm_name ?? "",
+            investor_type: roleProfile.investor_type ?? "",
+            min_investment_inr: roleProfile.min_investment_inr != null ? String(roleProfile.min_investment_inr) : "",
+            max_investment_inr: roleProfile.max_investment_inr != null ? String(roleProfile.max_investment_inr) : "",
+            deals_per_year: roleProfile.deals_per_year ?? "",
+            target_stages: Array.isArray(roleProfile.target_stages) ? roleProfile.target_stages : [],
+            target_sectors: Array.isArray(roleProfile.target_sectors) ? roleProfile.target_sectors : [],
+            value_add_tags: Array.isArray(roleProfile.value_add_tags) ? roleProfile.value_add_tags : [],
+            investment_thesis: roleProfile.investment_thesis ?? "",
           }));
         }
+
         if (pUrl) setPhotoUrl(pUrl);
         if (profile?.photo_path) setPhotoPath(profile.photo_path);
         setLoading(false);
@@ -246,14 +293,16 @@ export default function ProfileEditor({
         onProfileUpdate(form.full_name);
       }
 
-      const isDbBound = Boolean(authUser && authUser.role === role);
-      if (!isDbBound) {
-        const updated = { ...form, completion_percent };
-        setForm(updated);
-        try {
-          localStorage.setItem(`bylld_profile_${role}`, JSON.stringify(updated));
-          if (photoUrl) localStorage.setItem(`bylld_photo_${role}`, photoUrl);
-        } catch {}
+      // Save to localStorage for instant UI caching
+      const updated = { ...form, completion_percent };
+      setForm(updated);
+      try {
+        const cacheKey = authUser ? `bylld_profile_${authUser.id}` : `bylld_profile_${role}`;
+        localStorage.setItem(cacheKey, JSON.stringify(updated));
+        if (photoUrl) localStorage.setItem(`bylld_photo_${authUser ? authUser.id : role}`, photoUrl);
+      } catch {}
+
+      if (!authUser) {
         notify(`${isFounder ? "Founder" : "Investor"} profile saved (Preview Mode) ✓`);
         setSaving(false);
         return;
@@ -263,6 +312,7 @@ export default function ProfileEditor({
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          role,
           ...form,
           photo_path: photoPath,
           years_experience: form.years_experience ? Number(form.years_experience) : null,
@@ -274,7 +324,7 @@ export default function ProfileEditor({
       const data = await res.json();
       if (!res.ok) throw new Error(data.error ?? "Save failed");
       setForm((prev) => ({ ...prev, completion_percent: data.completion_percent ?? completion_percent }));
-      notify("Profile saved to database ✓");
+      notify(`${isFounder ? "Founder" : "Investor"} mandate saved to database ✓`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Save failed");
     } finally {
@@ -294,8 +344,7 @@ export default function ProfileEditor({
     setError("");
 
     try {
-      const isDbBound = Boolean(authUser && authUser.role === role);
-      if (!isDbBound) {
+      if (!authUser) {
         const reader = new FileReader();
         reader.onload = () => {
           const dataUrl = reader.result as string;
@@ -321,14 +370,14 @@ export default function ProfileEditor({
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Upload failed");
     } finally {
-      if (authUser && authUser.role === role) setUploadingPhoto(false);
+      setUploadingPhoto(false);
     }
   }
 
   const initials = form.full_name
-    ? form.full_name.split(" ").map((n) => n[0]).join("").slice(0, 2).toUpperCase()
-    : isFounder ? "AM" : "NK";
-  const displayName = form.full_name || (isFounder ? "Arjun Mehta" : "Neha Kapoor");
+    ? form.full_name.split(" ").filter(Boolean).map((n) => n[0]).join("").slice(0, 2).toUpperCase()
+    : (authUser?.initials ?? (isFounder ? "FM" : "IM"));
+  const displayName = form.full_name || (authUser?.fullName ?? (isFounder ? "Founder Member" : "Investor Member"));
 
   if (loading) {
     return (
@@ -822,7 +871,7 @@ export default function ProfileEditor({
                   required
                   value={form.full_name}
                   onChange={(e) => set("full_name", e.target.value)}
-                  placeholder="Arjun Mehta"
+                  placeholder="e.g. Your Full Name"
                 />
               </label>
 
@@ -874,7 +923,7 @@ export default function ProfileEditor({
                   type="url"
                   value={form.website_url}
                   onChange={(e) => set("website_url", e.target.value)}
-                  placeholder="https://arjunmehta.tech"
+                  placeholder="https://yourdomain.tech"
                 />
               </label>
 
@@ -931,7 +980,7 @@ export default function ProfileEditor({
                 <input
                   value={form.firm_name}
                   onChange={(e) => set("firm_name", e.target.value)}
-                  placeholder="e.g. Kapoor Ventures / Angel Syndicate"
+                  placeholder="e.g. Acme Ventures / Syndicate"
                 />
               </label>
 
@@ -1156,7 +1205,7 @@ export default function ProfileEditor({
                   required
                   value={form.full_name}
                   onChange={(e) => set("full_name", e.target.value)}
-                  placeholder="Neha Kapoor"
+                  placeholder="e.g. Your Full Name"
                 />
               </label>
 
@@ -1206,7 +1255,7 @@ export default function ProfileEditor({
                   type="url"
                   value={form.website_url}
                   onChange={(e) => set("website_url", e.target.value)}
-                  placeholder="https://nehakapoor.vc"
+                  placeholder="https://yourfund.vc"
                 />
               </label>
             </div>
