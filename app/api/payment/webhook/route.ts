@@ -14,7 +14,7 @@ import { createAdminClient } from "../../../../lib/supabase/admin";
  *   Secret: set RAZORPAY_WEBHOOK_SECRET in .env.local
  */
 export async function POST(req: NextRequest) {
-  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET;
+  const webhookSecret = process.env.RAZORPAY_WEBHOOK_SECRET || process.env.PAYMENT_WEBHOOK_SECRET;
   const rawBody = await req.text();
 
   if (!webhookSecret) {

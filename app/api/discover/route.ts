@@ -22,7 +22,7 @@ function currentWeekStart() {
   return date.toISOString().slice(0, 10);
 }
 
-export async function GET(req: NextRequest) {
+export async function GET() {
   const supabase = await createClient();
   const { data: { user }, error: authError } = await supabase.auth.getUser();
   if (authError || !user) {
@@ -47,7 +47,9 @@ export async function GET(req: NextRequest) {
   const viewsRemaining = isPremium ? null : Math.max(0, 7 - (usageResult.data?.unique_profile_views ?? 0));
   let items: string[][] = [];
 
-  const targetRole = req.nextUrl.searchParams.get("role") || account.role;
+  // The authenticated account determines what it can discover. Never trust a
+  // query parameter to change an account's role or data access.
+  const targetRole = account.role;
 
   if (targetRole === "founder") {
     let investorQuery = supabase

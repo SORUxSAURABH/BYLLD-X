@@ -57,7 +57,7 @@ export async function POST(req: NextRequest) {
   // Visitor previews can exercise mock checkout only. Live orders always require
   // an authenticated database account.
   if (authError || !user) {
-    if (!isRazorpayConfigured) {
+    if (process.env.NODE_ENV !== "production" && !isRazorpayConfigured) {
       const previewRole = req.headers.get("x-mock-role") === "investor" ? "investor" : "founder";
       return mockOrder(previewRole);
     }
@@ -98,7 +98,9 @@ export async function POST(req: NextRequest) {
     );
   }
 
-  if (!isRazorpayConfigured) return mockOrder(role, user.email ?? "member@bylldx.in");
+  if (!isRazorpayConfigured) {
+    return NextResponse.json({ error: "Live Razorpay credentials are not configured" }, { status: 503 });
+  }
 
   const { default: Razorpay } = await import("razorpay");
   const razorpay = new Razorpay({ key_id: keyId!, key_secret: keySecret! });
@@ -117,15 +119,17 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Could not create payment order with Razorpay. Try again." }, { status: 502 });
   }
 
-  try {
-    await supabase.from("payments").insert({
-      user_id: user.id,
-      amount_inr: amountInr,
-      provider: "razorpay",
-      provider_payment_id: order.id,
-      status: "pending",
-    });
-  } catch {}
+  const { error: ledgerError } = await supabase.rpc("insert_payment", {
+    p_user_id: user.id,
+    p_provider: "razorpay",
+    p_provider_payment_id: order.id,
+    p_amount_inr: amountInr,
+    p_idempotency_key: idempotencyKey,
+  });
+  if (ledgerError) {
+    console.error("Payment ledger creation failed:", ledgerError.message);
+    return NextResponse.json({ error: "Could not prepare payment securely. Please try again." }, { status: 500 });
+  }
 
   const { data: profile } = await supabase
     .from("profiles")

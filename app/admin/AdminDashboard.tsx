@@ -109,9 +109,6 @@ type IconName =
   | "trend"
   | "users";
 
-const DEFAULT_MASTER_KEY = "bylldx-master-2026";
-const STORAGE_KEY = "bylldx-admin-key";
-
 const tabs: { id: TabId; label: string; icon: IconName }[] = [
   { id: "analytics", label: "Telemetry", icon: "trend" },
   { id: "members", label: "User Directory", icon: "users" },
@@ -318,10 +315,10 @@ function EmptyState({ icon, title, message }: { icon: IconName; title: string; m
 }
 
 export default function AdminDashboard() {
-  const [isBooting, setIsBooting] = useState(true);
+  const [isBooting] = useState(false);
   const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [adminKey, setAdminKey] = useState("");
-  const [passkey, setPasskey] = useState(DEFAULT_MASTER_KEY);
+  const [passkey, setPasskey] = useState("");
   const [showPasskey, setShowPasskey] = useState(false);
   const [authError, setAuthError] = useState("");
   const [isAuthenticating, setIsAuthenticating] = useState(false);
@@ -336,30 +333,6 @@ export default function AdminDashboard() {
   const [broadcastMessage, setBroadcastMessage] = useState("");
   const [broadcastType, setBroadcastType] = useState<BroadcastType>("info");
   const [broadcastActive, setBroadcastActive] = useState(true);
-
-  useEffect(() => {
-    const controller = new AbortController();
-    const storedKey = window.localStorage.getItem(STORAGE_KEY);
-    if (!storedKey) {
-      setIsBooting(false);
-      return () => controller.abort();
-    }
-
-    fetchDashboard(storedKey, controller.signal)
-      .then((payload) => {
-        setAdminKey(storedKey);
-        setData(payload);
-        setLastSyncedAt(new Date());
-        setIsAuthenticated(true);
-      })
-      .catch((error: unknown) => {
-        if (error instanceof DOMException && error.name === "AbortError") return;
-        window.localStorage.removeItem(STORAGE_KEY);
-      })
-      .finally(() => setIsBooting(false));
-
-    return () => controller.abort();
-  }, []);
 
   useEffect(() => {
     if (!data?.broadcast) return;
@@ -418,7 +391,6 @@ export default function AdminDashboard() {
     setAuthError("");
     try {
       const payload = await fetchDashboard(candidate);
-      window.localStorage.setItem(STORAGE_KEY, candidate);
       setAdminKey(candidate);
       setData(payload);
       setLastSyncedAt(new Date());
@@ -431,7 +403,6 @@ export default function AdminDashboard() {
   }
 
   function lockConsole() {
-    window.localStorage.removeItem(STORAGE_KEY);
     setAdminKey("");
     setPasskey("");
     setData(null);
