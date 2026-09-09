@@ -46,7 +46,7 @@ begin
 
   select role into v_role from public.users where id = v_user_id;
   if p_provider <> 'razorpay'
-    or p_amount_inr <> case when v_role = 'investor' then 310 else 240 end then
+    or p_amount_inr <> (case when v_role = 'investor' then 310 else 240 end) then
     raise exception 'invalid payment details';
   end if;
 
