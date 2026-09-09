@@ -6,7 +6,8 @@ export const dynamic = "force-dynamic";
 
 /**
  * POST /api/payment/verify
- * Verifies Razorpay payment signature and activates 30-day Premium membership.
+ * Verifies the checkout signature. Entitlement activation is performed only by
+ * the independently signed Razorpay webhook.
  */
 export async function POST(req: NextRequest) {
   const keySecret = process.env.RAZORPAY_KEY_SECRET;
@@ -18,7 +19,6 @@ export async function POST(req: NextRequest) {
     razorpay_order_id?: string;
     razorpay_payment_id?: string;
     razorpay_signature?: string;
-    role?: "founder" | "investor";
   };
 
   try {
@@ -27,7 +27,7 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Invalid JSON request body" }, { status: 400 });
   }
 
-  const { razorpay_order_id, razorpay_payment_id, razorpay_signature, role } = body;
+  const { razorpay_order_id, razorpay_payment_id, razorpay_signature } = body;
 
   if (!razorpay_order_id || !razorpay_payment_id || !razorpay_signature) {
     return NextResponse.json(
@@ -64,35 +64,19 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: "Unauthorized access" }, { status: 401 });
   }
 
-  const amountInr = role === "investor" ? 310 : 240;
-  const now = new Date();
-  const thirtyDaysLater = new Date(now.getTime() + 30 * 24 * 60 * 60 * 1000);
-  const invoiceNumber = `BYLLD-${Math.floor(100000 + Math.random() * 900000)}`;
-
-  // 3. Upsert 30-day Premium subscription in Supabase
-  try {
-    await supabase.from("subscriptions").upsert(
-      {
-        user_id: user.id,
-        tier: "premium",
-        starts_at: now.toISOString(),
-        ends_at: thirtyDaysLater.toISOString(),
-        updated_at: now.toISOString(),
-      },
-      { onConflict: "user_id" }
-    );
-
-    // Record in payments table
-    await supabase.from("payments").insert({
-      user_id: user.id,
-      amount_inr: amountInr,
-      provider: "razorpay",
-      provider_payment_id: razorpay_payment_id,
-      status: "successful",
-      paid_at: now.toISOString(),
-    });
-  } catch (dbError) {
-    console.warn("Database subscription update notice:", dbError);
+  const { data: payment, error: paymentError } = await supabase
+    .from("payments")
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("provider", "razorpay")
+    .eq("provider_payment_id", razorpay_order_id)
+    .maybeSingle();
+  if (paymentError) {
+    console.error("Payment lookup failed:", paymentError.message);
+    return NextResponse.json({ error: "Could not verify the payment order" }, { status: 500 });
+  }
+  if (!payment) {
+    return NextResponse.json({ error: "Payment order was not found for this account" }, { status: 404 });
   }
 
   return NextResponse.json({
@@ -100,9 +84,6 @@ export async function POST(req: NextRequest) {
     verified: true,
     orderId: razorpay_order_id,
     paymentId: razorpay_payment_id,
-    invoiceNumber,
-    startsAt: now.toISOString(),
-    endsAt: thirtyDaysLater.toISOString(),
-    role: role ?? "founder",
+    fulfillment: "pending_webhook",
   });
 }

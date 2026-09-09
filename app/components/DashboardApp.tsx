@@ -29,13 +29,12 @@ export default function DashboardApp() {
   // Keep presence active when authenticated
   usePresence(user?.id ?? null);
 
-  // Role: Supports seamless 1-click switching between Founder and Investor views
+  // Guest previews may select a role, but authenticated members always use the
+  // role persisted on their server-side account.
   const urlRole = params.get("role");
-  const role: Role = (urlRole === "investor" || urlRole === "founder")
-    ? urlRole
-    : user
-      ? (user.role === "investor" ? "investor" : "founder")
-      : "founder";
+  const role: Role = user
+    ? (user.role === "investor" ? "investor" : "founder")
+    : (urlRole === "investor" || urlRole === "founder" ? urlRole : "founder");
   const view = (["overview","discover","ideas","network","inbox","subscription","profile"].includes(params.get("view") || "") ? params.get("view") : "overview") as View;
   const [saved, setSaved] = useState<string[]>([]);
   const [toast, setToast] = useState("");
@@ -903,7 +902,7 @@ function Discover({
       return;
     }
     setDiscoverLoading(true);
-    fetch(`/api/discover?role=${role}`, { cache: "no-store" })
+    fetch("/api/discover", { cache: "no-store" })
       .then((r) => r.json())
       .then((d) => {
         setDbList(d.realUsers ?? []);
@@ -1482,64 +1481,6 @@ function Subscription({
 }) {
   const price = role === "founder" ? 240 : 310;
 
-  function handleDownloadReceipt() {
-    const invNo = `BYLLD-${Math.floor(100000 + Math.random() * 900000)}`;
-    const dateStr = new Date().toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
-    const expiryStr = new Date(Date.now() + 30 * 86400000).toLocaleDateString("en-IN", { day: "numeric", month: "long", year: "numeric" });
-    const receiptHtml = `<!DOCTYPE html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Payment Receipt - ${invNo}</title>
-  <style>
-    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; padding: 40px; color: #06143d; background: #f8fbff; line-height: 1.6; }
-    .receipt { max-width: 580px; margin: 0 auto; border: 1px solid #cbd5e1; border-radius: 16px; padding: 36px; background: #ffffff; box-shadow: 0 10px 30px rgba(0,0,0,0.06); }
-    .header { display: flex; justify-content: space-between; align-items: center; border-bottom: 2px solid #0c55ed; padding-bottom: 20px; margin-bottom: 24px; }
-    .logo { font-size: 26px; font-weight: 900; letter-spacing: -1.2px; }
-    .logo b { color: #0c55ed; }
-    .badge { background: #dcfce7; color: #15803d; border: 1px solid #bbf7d0; padding: 5px 12px; border-radius: 20px; font-size: 11px; font-weight: 800; letter-spacing: 0.05em; }
-    .row { display: flex; justify-content: space-between; margin: 12px 0; font-size: 13px; color: #334155; }
-    .row strong { color: #0f172a; }
-    .total { border-top: 2px solid #e2e8f0; margin-top: 24px; padding-top: 18px; font-size: 18px; font-weight: 900; color: #0f172a; }
-    .footer { margin-top: 36px; font-size: 11px; color: #64748b; text-align: center; border-top: 1px dashed #cbd5e1; padding-top: 20px; }
-    @media print { body { background: #fff; padding: 0; } .receipt { border: 0; box-shadow: none; padding: 0; } }
-  </style>
-</head>
-<body>
-  <div class="receipt">
-    <div class="header">
-      <div class="logo">BYLLD<b>X</b></div>
-      <span class="badge">PAID · SUCCESSFUL</span>
-    </div>
-    <div class="row"><strong>Receipt / Invoice:</strong><span>${invNo}</span></div>
-    <div class="row"><strong>Payment Date:</strong><span>${dateStr}</span></div>
-    <div class="row"><strong>Plan Purchased:</strong><span>${role === "founder" ? "Founder Premium" : "Investor Premium"} (1 Month)</span></div>
-    <div class="row"><strong>Billing Terms:</strong><span>Manual monthly access (No auto-renewal)</span></div>
-    <div class="row"><strong>Access Valid Until:</strong><span>${expiryStr}</span></div>
-    <div class="row"><strong>Payment Method:</strong><span>Razorpay / Mock Checkout</span></div>
-    <div class="row total">
-      <span>Total Paid:</span>
-      <span style="color: #0c55ed;">₹${price}.00</span>
-    </div>
-    <div class="footer">
-      BYLLD X · Confidential matching & communication layer · Verified payment receipt
-    </div>
-  </div>
-  <script>setTimeout(() => window.print(), 300);</script>
-</body>
-</html>`;
-
-    const blob = new Blob([receiptHtml], { type: "text/html" });
-    const url = URL.createObjectURL(blob);
-    const win = window.open(url, "_blank");
-    if (!win) {
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `Receipt-${invNo}.html`;
-      a.click();
-    }
-  }
-
   if (isPremium) {
     return (
       <>
@@ -1571,18 +1512,9 @@ function Subscription({
               <li>Unlimited connection requests</li>
               <li>Up to 5 active ideas & niches</li>
               <li>Direct 1-on-1 messaging unlocked</li>
-              <li>Verified payment receipt available</li>
+              <li>Payment confirmation retained in your account</li>
             </ul>
 
-            <div style={{ marginTop: 24, display: "flex", gap: 12, flexWrap: "wrap", alignItems: "center" }}>
-              <button
-                className="button button-small"
-                onClick={handleDownloadReceipt}
-                style={{ background: "var(--blue, #0c55ed)", color: "#fff", cursor: "pointer" }}
-              >
-                📄 Download Receipt
-              </button>
-            </div>
           </article>
         </div>
       </>
@@ -1611,7 +1543,7 @@ function Subscription({
             <li>Unlimited connection requests</li>
             <li>Five active niches {role === "founder" ? "and ideas" : ""}</li>
             <li>Send messages to connections</li>
-            <li>Downloadable test receipt</li>
+            <li>Server-verified payment entitlement</li>
           </ul>
           <div style={{ marginTop: 24 }}>
             <RazorpayCheckout role={role} onSuccess={onUpgrade} />
@@ -1619,7 +1551,7 @@ function Subscription({
         </article>
       </div>
       <p style={{ fontSize: 10, color: "var(--muted)", marginTop: 18, maxWidth: 650, lineHeight: 1.6 }}>
-        Payments are powered by Razorpay (UPI, cards, net banking). When no merchant credentials are configured, the checkout gracefully provides a test confirmation without charging real funds.
+        Payments are powered by Razorpay (UPI, cards, net banking). Premium access is activated only after Razorpay&apos;s signed webhook is processed.
       </p>
     </>
   );

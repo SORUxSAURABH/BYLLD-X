@@ -1,15 +1,26 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "../../../../lib/supabase/server";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 import { adminStore } from "../../../../lib/adminStore";
 
 export const dynamic = "force-dynamic";
 
 export async function POST(req: NextRequest) {
   const adminKey = req.headers.get("x-admin-key");
-  const expectedKey = process.env.ADMIN_SECRET_KEY || "bylldx-master-2026";
+  const expectedKey = process.env.ADMIN_SECRET_KEY;
+
+  if (!expectedKey) {
+    return NextResponse.json({ error: "Admin access is not configured" }, { status: 503 });
+  }
 
   if (!adminKey || adminKey !== expectedKey) {
     return NextResponse.json({ error: "Unauthorized access: invalid admin master key" }, { status: 401 });
+  }
+
+  let supabase;
+  try {
+    supabase = createAdminClient();
+  } catch {
+    return NextResponse.json({ error: "Admin database access is not configured" }, { status: 503 });
   }
 
   let body: {
@@ -34,8 +45,6 @@ export async function POST(req: NextRequest) {
   const { action, userId, role, accountStatus, ideaId, broadcast } = body;
 
   try {
-    const supabase = await createClient();
-
     // 1. Toggle Premium
     if (action === "toggle_premium" && userId) {
       const mockUser = adminStore.mockUsers.find((u) => u.id === userId);
@@ -45,27 +54,19 @@ export async function POST(req: NextRequest) {
         newPremiumState = mockUser.isPremium;
       }
 
-      // Try database update
-      try {
-        const now = new Date();
-        const endsAt = new Date(now);
-        endsAt.setDate(endsAt.getDate() + 30);
-
-        if (newPremiumState) {
-          await supabase.from("subscriptions").insert({
+      const now = new Date();
+      const endsAt = new Date(now);
+      endsAt.setDate(endsAt.getDate() + 30);
+      const { error } = newPremiumState
+        ? await supabase.from("subscriptions").insert({
             user_id: userId,
             tier: "premium",
             starts_at: now.toISOString(),
             ends_at: endsAt.toISOString(),
-          });
-        } else {
-          await supabase
-            .from("subscriptions")
-            .delete()
-            .eq("user_id", userId);
-        }
-      } catch (dbErr) {
-        console.warn("DB subscription toggle note:", dbErr);
+          })
+        : await supabase.from("subscriptions").delete().eq("user_id", userId);
+      if (error) {
+        return NextResponse.json({ error: error.message }, { status: 500 });
       }
 
       return NextResponse.json({
@@ -81,9 +82,8 @@ export async function POST(req: NextRequest) {
       if (mockUser) {
         mockUser.role = role;
       }
-      try {
-        await supabase.from("users").update({ role }).eq("id", userId);
-      } catch {}
+      const { error } = await supabase.from("users").update({ role }).eq("id", userId);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
       return NextResponse.json({
         success: true,
@@ -98,9 +98,8 @@ export async function POST(req: NextRequest) {
       if (mockUser) {
         mockUser.accountStatus = accountStatus;
       }
-      try {
-        await supabase.from("users").update({ account_status: accountStatus }).eq("id", userId);
-      } catch {}
+      const { error } = await supabase.from("users").update({ account_status: accountStatus }).eq("id", userId);
+      if (error) return NextResponse.json({ error: error.message }, { status: 500 });
 
       return NextResponse.json({
         success: true,

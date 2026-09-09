@@ -29,17 +29,18 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
   const [error, setError] = useState("");
   const [success, setSuccess] = useState(false);
   const [checkoutMode, setCheckoutMode] = useState<"mock" | "live" | null>(null);
+  const [awaitingActivation, setAwaitingActivation] = useState(false);
   const [invoiceInfo, setInvoiceInfo] = useState<{ invoiceNumber?: string; startsAt?: string; endsAt?: string } | null>(null);
   const price = role === "investor" ? 310 : 240;
 
   async function waitForWebhookActivation() {
-    for (let attempt = 0; attempt < 8; attempt += 1) {
+    for (let attempt = 0; attempt < 15; attempt += 1) {
       const response = await fetch("/api/payment/create-order", { cache: "no-store" });
       if (response.ok) {
         const status = await response.json();
         if (status.isPremium) return true;
       }
-      await new Promise((resolve) => window.setTimeout(resolve, 1000));
+      await new Promise((resolve) => window.setTimeout(resolve, 2000));
     }
     return false;
   }
@@ -139,11 +140,6 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
         return;
       }
 
-      if (typeof window !== "undefined") {
-        localStorage.setItem("bylldx_mock_premium", "true");
-        localStorage.setItem("bylldx_mock_premium_expiry", (Date.now() + 30 * 86400000).toString());
-      }
-
       setInvoiceInfo(invData);
       setCheckoutMode("mock");
       setSuccess(true);
@@ -187,7 +183,6 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
               razorpay_payment_id: response.razorpay_payment_id,
               razorpay_order_id: response.razorpay_order_id,
               razorpay_signature: response.razorpay_signature,
-              role,
             }),
           });
           const verifyData = await verifyRes.json();
@@ -195,18 +190,26 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
             throw new Error(verifyData.error || "Payment verification failed");
           }
 
-          setInvoiceInfo(verifyData);
+          setAwaitingActivation(true);
+          const activated = await waitForWebhookActivation();
+          if (!activated) {
+            setError("Payment was verified, but Premium activation is still pending. Do not pay again; refresh shortly or contact support with your Razorpay payment ID.");
+            return;
+          }
+
           setCheckoutMode("live");
           setSuccess(true);
-          setLoading(false);
           onSuccess("live");
         } catch (err) {
           setError(err instanceof Error ? err.message : "Payment verification failed");
+        } finally {
+          setAwaitingActivation(false);
           setLoading(false);
         }
       },
       modal: {
         ondismiss: function () {
+          setAwaitingActivation(false);
           setLoading(false);
         },
       },
@@ -270,13 +273,13 @@ export default function RazorpayCheckout({ role, onSuccess }: RazorpayCheckoutPr
         disabled={loading}
         style={{ width: "100%", justifyContent: "center", cursor: "pointer" }}
       >
-        {loading ? "Processing payment…" : `Pay ₹${price} — Activate Premium →`}
+        {loading ? (awaitingActivation ? "Confirming Premium access…" : "Processing payment…") : `Pay ₹${price} — Activate Premium →`}
       </button>
       {error && (
         <p style={{ color: "#ef4444", fontSize: 12, marginTop: 8 }}>{error}</p>
       )}
       <p style={{ fontSize: 10, color: "var(--muted, #94a3b8)", marginTop: 10, lineHeight: 1.6 }}>
-        Payments are processed securely via Razorpay (UPI, cards, net banking). When no live keys are configured, checkout activates via instant test confirmation.
+        Payments are processed securely via Razorpay (UPI, cards, net banking). Premium access is granted only after the provider&apos;s signed webhook is processed.
       </p>
     </div>
   );

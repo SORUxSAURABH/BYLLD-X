@@ -27,6 +27,12 @@ function formatTime(iso: string) {
   return new Date(iso).toLocaleTimeString("en-IN", { hour: "2-digit", minute: "2-digit" });
 }
 
+function mergeMessages(existing: Message[], incoming: Message[]) {
+  const byId = new Map(existing.map((message) => [message.id, message]));
+  incoming.forEach((message) => byId.set(message.id, message));
+  return [...byId.values()].sort((a, b) => a.created_at.localeCompare(b.created_at));
+}
+
 export default function RealtimeChat({
   conversationId,
   currentUserId,
@@ -73,7 +79,7 @@ export default function RealtimeChat({
         if (error) {
           setChatError("Could not load messages.");
         } else {
-          setMessages((data as Message[]) ?? []);
+          setMessages((previous) => mergeMessages(previous, (data as Message[]) ?? []));
         }
       });
 
@@ -89,10 +95,17 @@ export default function RealtimeChat({
           filter: `conversation_id=eq.${conversationId}`,
         },
         (payload) => {
-          setMessages((prev) => [...prev, payload.new as Message]);
+          setMessages((previous) => mergeMessages(previous, [payload.new as Message]));
         }
       )
-      .subscribe();
+      .subscribe((status) => {
+        if (status === "CHANNEL_ERROR" || status === "TIMED_OUT") {
+          setChatError("Live updates are reconnecting. Your messages remain safe.");
+        }
+        if (status === "SUBSCRIBED") {
+          setChatError("");
+        }
+      });
 
     return () => {
       supabase.removeChannel(channel);

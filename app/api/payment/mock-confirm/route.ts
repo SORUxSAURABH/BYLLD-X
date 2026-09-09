@@ -2,6 +2,10 @@ import { NextRequest, NextResponse } from "next/server";
 import { createClient } from "../../../../lib/supabase/server";
 
 export async function POST(req: NextRequest) {
+  if (process.env.NODE_ENV === "production") {
+    return NextResponse.json({ error: "Mock checkout is disabled in production" }, { status: 404 });
+  }
+
   let body: { role?: string; orderId?: string } = {};
   try {
     body = await req.json();

@@ -69,10 +69,6 @@ export async function proxy(request: NextRequest) {
     pathname.startsWith("/dashboard") ||
     pathname.startsWith("/onboarding")
   )) {
-    if (pathname.startsWith("/dashboard") && (request.nextUrl.searchParams.has("role") || request.nextUrl.searchParams.get("demo") === "true")) {
-      return response;
-    }
-
     const { data: account } = await supabase
       .from("users")
       .select("role, onboarding_completed_at")

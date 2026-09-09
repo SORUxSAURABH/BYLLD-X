@@ -1,12 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createClient } from "../../../../lib/supabase/server";
+import { createAdminClient } from "../../../../lib/supabase/admin";
 import { adminStore } from "../../../../lib/adminStore";
 
 export const dynamic = "force-dynamic";
 
 export async function GET(req: NextRequest) {
   const adminKey = req.headers.get("x-admin-key");
-  const expectedKey = process.env.ADMIN_SECRET_KEY || "bylldx-master-2026";
+  const expectedKey = process.env.ADMIN_SECRET_KEY;
+
+  if (!expectedKey) {
+    return NextResponse.json({ error: "Admin access is not configured" }, { status: 503 });
+  }
 
   if (!adminKey || adminKey !== expectedKey) {
     return NextResponse.json({ error: "Unauthorized access: invalid admin master key" }, { status: 401 });
@@ -18,7 +22,7 @@ export async function GET(req: NextRequest) {
   let dbSubscriptions: Array<Record<string, any>> = [];
 
   try {
-    const supabase = await createClient();
+    const supabase = createAdminClient();
 
     const [usersRes, profilesRes, ideasRes, paymentsRes, subsRes] = await Promise.all([
       supabase.from("users").select("id, email, role, account_status, created_at"),
@@ -27,6 +31,11 @@ export async function GET(req: NextRequest) {
       supabase.from("payments").select("id, user_id, amount_inr, provider, status, created_at").order("created_at", { ascending: false }).limit(20),
       supabase.from("subscriptions").select("id, user_id, tier, starts_at, ends_at"),
     ]);
+
+    const dbError = [usersRes, profilesRes, ideasRes, paymentsRes, subsRes].find((result) => result.error)?.error;
+    if (dbError) {
+      return NextResponse.json({ error: dbError.message }, { status: 500 });
+    }
 
     const profileMap = new Map((profilesRes.data || []).map((p) => [p.user_id, p.full_name]));
     const now = new Date().toISOString();
@@ -76,7 +85,8 @@ export async function GET(req: NextRequest) {
       dbSubscriptions = subsRes.data;
     }
   } catch (err) {
-    console.error("Admin stats DB query warning:", err);
+    console.error("Admin stats DB query failed:", err);
+    return NextResponse.json({ error: "Could not load admin data" }, { status: 500 });
   }
 
   const mergedUsers = dbUsers;
