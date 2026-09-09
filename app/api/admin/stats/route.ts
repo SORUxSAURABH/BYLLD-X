@@ -20,19 +20,26 @@ export async function GET(req: NextRequest) {
   let dbIdeas: Array<Record<string, any>> = [];
   let dbPayments: Array<Record<string, any>> = [];
   let dbSubscriptions: Array<Record<string, any>> = [];
+  let totalRevenueInr = 0;
+  let activeSubscriptions = 0;
+  let totalConnections = 0;
+  let totalMessages = 0;
 
   try {
     const supabase = createAdminClient();
 
-    const [usersRes, profilesRes, ideasRes, paymentsRes, subsRes] = await Promise.all([
+    const [usersRes, profilesRes, ideasRes, paymentsRes, revenueRes, subsRes, connectionsRes, messagesRes] = await Promise.all([
       supabase.from("users").select("id, email, role, account_status, created_at"),
       supabase.from("profiles").select("user_id, full_name"),
-      supabase.from("ideas").select("id, founder_id, title, stage, target_raise_inr, is_confidential, created_at"),
+      supabase.from("ideas").select("id, founder_id, title, startup_stage, funding_requested_inr, created_at"),
       supabase.from("payments").select("id, user_id, amount_inr, provider, status, created_at").order("created_at", { ascending: false }).limit(20),
+      supabase.from("payments").select("amount_inr").eq("status", "successful"),
       supabase.from("subscriptions").select("id, user_id, tier, starts_at, ends_at"),
+      supabase.from("connections").select("id", { count: "exact", head: true }).is("disconnected_at", null),
+      supabase.from("messages").select("id", { count: "exact", head: true }),
     ]);
 
-    const dbError = [usersRes, profilesRes, ideasRes, paymentsRes, subsRes].find((result) => result.error)?.error;
+    const dbError = [usersRes, profilesRes, ideasRes, paymentsRes, revenueRes, subsRes, connectionsRes, messagesRes].find((result) => result.error)?.error;
     if (dbError) {
       return NextResponse.json({ error: dbError.message }, { status: 500 });
     }
@@ -44,6 +51,13 @@ export async function GET(req: NextRequest) {
         .filter((s) => s.tier === "premium" && s.ends_at > now)
         .map((s) => s.user_id)
     );
+    activeSubscriptions = activeSubUserIds.size;
+    totalRevenueInr = (revenueRes.data || []).reduce(
+      (total, payment) => total + (payment.amount_inr || 0),
+      0
+    );
+    totalConnections = connectionsRes.count || 0;
+    totalMessages = messagesRes.count || 0;
 
     if (usersRes.data && usersRes.data.length > 0) {
       dbUsers = usersRes.data.map((u) => ({
@@ -62,9 +76,9 @@ export async function GET(req: NextRequest) {
         id: i.id,
         title: i.title,
         founderName: profileMap.get(i.founder_id) || "Founder",
-        stage: i.stage || "Pre-seed",
-        targetRaiseInr: i.target_raise_inr || 5000000,
-        isConfidential: i.is_confidential ?? false,
+        stage: i.startup_stage || "Unspecified",
+        targetRaiseInr: i.funding_requested_inr || 0,
+        isConfidential: false,
         isFeatured: adminStore.featuredIdeaIds.includes(i.id),
         createdAt: i.created_at,
       }));
@@ -96,11 +110,9 @@ export async function GET(req: NextRequest) {
 
   const mergedIdeas = dbIdeas;
   const mergedPayments = dbPayments;
-  const totalRevenueInr = mergedPayments
-    .filter((p) => p.status === "successful")
-    .reduce((acc, curr) => acc + (curr.amountInr || 0), 0);
-
-  const mrrInr = (foundersCount * 240 + investorsCount * 310) * 0.45;
+  const premiumFounderCount = mergedUsers.filter((u) => u.isPremium && u.role === "founder").length;
+  const premiumInvestorCount = mergedUsers.filter((u) => u.isPremium && u.role === "investor").length;
+  const mrrInr = premiumFounderCount * 240 + premiumInvestorCount * 310;
 
   return NextResponse.json({
     success: true,
@@ -109,12 +121,12 @@ export async function GET(req: NextRequest) {
       foundersCount,
       investorsCount,
       premiumCount,
-      activeSubscriptions: Math.max(premiumCount, dbSubscriptions.length),
+      activeSubscriptions,
       totalIdeas: mergedIdeas.length,
       totalRevenueInr,
       mrrInr: Math.round(mrrInr),
-      totalConnections: 42,
-      totalMessages: 188,
+      totalConnections,
+      totalMessages,
     },
     users: mergedUsers,
     ideas: mergedIdeas,
